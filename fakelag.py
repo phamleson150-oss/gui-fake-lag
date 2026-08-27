@@ -8,7 +8,6 @@ import winsound
 import json
 import random
 import subprocess
-import urllib.request
 import urllib.parse
 import webbrowser
 from collections import deque
@@ -16,6 +15,7 @@ from dataclasses import dataclass
 
 import pydivert
 import keyboard
+import requests
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFrame, QStackedWidget, QLineEdit
@@ -26,10 +26,8 @@ from PyQt6.QtGui import QColor, QPainter, QBrush, QPen, QFont, QLinearGradient, 
 # ================= ĐƯỜNG DẪN THƯ MỤC CÙNG FILE .EXE =================
 def get_app_dir():
     if getattr(sys, 'frozen', False):
-        # Khi chạy dưới dạng file .exe đóng gói
         return os.path.dirname(sys.executable)
     else:
-        # Khi chạy file .py trực tiếp
         return os.path.dirname(os.path.abspath(__file__))
 
 BASE_DIR = get_app_dir()
@@ -75,13 +73,12 @@ def verify_key_with_vps(key_str):
         return False, "Vui lòng nhập mã Key!", 0
     try:
         url = f"{VPS_VERIFY_URL}?key={urllib.parse.quote(key_str)}&hwid={CURRENT_HWID}"
-        req = urllib.request.Request(url, headers={'User-Agent': 'ZeroXClient/1.0'})
-        with urllib.request.urlopen(req, timeout=5) as response:
-            res_data = json.loads(response.read().decode('utf-8'))
-            valid = res_data.get("valid", False) or res_data.get("success", False)
-            msg = res_data.get("msg", "Lỗi xác thực")
-            expires_at = res_data.get("expires_at", -1)
-            return valid, msg, expires_at
+        response = requests.get(url, timeout=5)
+        res_data = response.json()
+        valid = res_data.get("valid", False) or res_data.get("success", False)
+        msg = res_data.get("msg", "Lỗi xác thực")
+        expires_at = res_data.get("expires_at", -1)
+        return valid, msg, expires_at
     except Exception:
         return False, "Không thể kết nối VPS 103.78.3.222:53689!", 0
 
@@ -361,7 +358,6 @@ def hotkey_loop():
                 is_freeze = net_state.freeze_mode
                 f_time = net_state.freeze_active_time
 
-            # CHỈ DUY NHẤT FREEZE TỰ TẮT
             if is_freeze and f_time > 0 and (curr_t - f_time >= FREEZE_AUTO_DISABLE_SEC):
                 with net_state.lock:
                     net_state.freeze_mode = False
@@ -413,7 +409,7 @@ class RainbowHeaderOverlay(QWidget):
         self.hue_offset = 0.0
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.animate_rainbow)
-        self.timer.start(16)
+        self.timer.start(33)
 
         self.target_hwnd = None
         self.track_timer = QTimer(self)
@@ -590,10 +586,10 @@ class Particle:
 class CustomParticleFrame(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.particles = [Particle(340, 240) for _ in range(45)]
+        self.particles = [Particle(340, 240) for _ in range(30)]
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.animate_particles)
-        self.timer.start(16)
+        self.timer.start(33)
 
     def animate_particles(self):
         w, h = self.width(), self.height()
@@ -929,7 +925,6 @@ class DownloadWidget(QWidget):
             self.left_lbl.setText("Verified")
             self.right_lbl.setText("100% 14.8/14.8 MB")
             
-            # GIAO DIỆN INJECT XANH LÁ ĐẬM
             self.action_btn.setText("INJECT")
             self.action_btn.setStyleSheet("""
                 QPushButton {
@@ -1205,14 +1200,17 @@ class MainContainerWindow(QWidget):
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
             self._drag = True
-            self._pos = e.globalPosition().toPoint() - self.pos()
+            self._pos = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            e.accept()
 
     def mouseMoveEvent(self, e):
         if self._drag and self._pos:
             self.move(e.globalPosition().toPoint() - self._pos)
+            e.accept()
 
     def mouseReleaseEvent(self, e):
         self._drag = False
+        e.accept()
 
 # ================= RUNTIME ENTRY =================
 def cleanup_and_exit():
