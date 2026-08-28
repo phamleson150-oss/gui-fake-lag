@@ -244,6 +244,7 @@ class AppSignals(QObject):
     stream_toggle = pyqtSignal(bool)
     toggle_visibility = pyqtSignal()
     start_tracking = pyqtSignal()
+    key_expired = pyqtSignal()
 
 signals = AppSignals()
 
@@ -1053,6 +1054,76 @@ class InitializingWidget(QWidget):
             self.timer.stop()
             QTimer.singleShot(250, self.on_finish)
 
+class KeyExpiredWidget(QWidget):
+    def __init__(self, on_relogin_callback, on_close_callback, parent=None):
+        super().__init__(parent)
+        self.on_relogin = on_relogin_callback
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 8, 14, 14)
+        layout.setSpacing(8)
+
+        layout.addWidget(TopBar("EXPIRED NOTIFICATION", on_close=on_close_callback))
+        layout.addSpacing(4)
+
+        warn_icon = QLabel("⚠️")
+        warn_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        warn_icon.setStyleSheet("font-size: 26px; background: transparent; border: none;")
+        layout.addWidget(warn_icon)
+
+        title_lbl = QLabel("KEY ĐÃ HẾT HẠN SỬ DỤNG!")
+        title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title_lbl.setStyleSheet("color: #ef4444; font-size: 12px; font-weight: 800; font-family: 'Segoe UI', Arial;")
+        layout.addWidget(title_lbl)
+
+        sub_lbl = QLabel("Hệ thống đã tự động ngắt toàn bộ Fake Lag.\nVui lòng gia hạn hoặc lấy key mới để tiếp tục.")
+        sub_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sub_lbl.setStyleSheet("color: #9ca3af; font-size: 10px; font-weight: 500; font-family: 'Segoe UI', Arial;")
+        layout.addWidget(sub_lbl)
+
+        layout.addStretch()
+
+        btn_box = QHBoxLayout()
+        btn_box.setSpacing(8)
+
+        relogin_btn = QPushButton("NHẬP KEY MỚI")
+        relogin_btn.setFixedHeight(32)
+        relogin_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        relogin_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #00873a;
+                color: #ffffff;
+                border: 1px solid #00ff66;
+                border-radius: 6px;
+                font-size: 10.5px;
+                font-weight: 800;
+                font-family: 'Consolas', sans-serif;
+            }
+            QPushButton:hover { background-color: #00a346; }
+        """)
+        relogin_btn.clicked.connect(self.on_relogin)
+        btn_box.addWidget(relogin_btn)
+
+        get_key_btn = QPushButton("GET KEY")
+        get_key_btn.setFixedHeight(32)
+        get_key_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        get_key_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #12141a;
+                border: 1px solid #27272a;
+                border-radius: 6px;
+                color: #d1d5db;
+                font-size: 10.5px;
+                font-weight: 700;
+                font-family: 'Consolas', monospace;
+            }
+            QPushButton:hover { background-color: #1a1e28; color: #ffffff; border-color: #3f3f46; }
+        """)
+        get_key_btn.clicked.connect(lambda: webbrowser.open(GET_KEY_URL))
+        btn_box.addWidget(get_key_btn)
+
+        layout.addLayout(btn_box)
+
 class KeybindsWidget(QWidget):
     def __init__(self, on_close_callback, parent=None):
         super().__init__(parent)
@@ -1063,7 +1134,6 @@ class KeybindsWidget(QWidget):
 
         self.top_bar = TopBar("KEYBINDS", on_close=on_close_callback)
 
-        # Nút chuyển đổi nhanh chế độ Fix Dame phong cách xám gọn gàng
         self.fix_mode_btn = QPushButton()
         self.fix_mode_btn.setFixedHeight(18)
         self.fix_mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1109,8 +1179,13 @@ class KeybindsWidget(QWidget):
 
         self.countdown_timer = QTimer(self)
         self.countdown_timer.timeout.connect(self.update_key_expiry_display)
+
+    def start_timer(self):
         self.countdown_timer.start(1000)
         self.update_key_expiry_display()
+
+    def stop_timer(self):
+        self.countdown_timer.stop()
 
     def update_fix_mode_btn(self):
         text = "Fix: ON" if app_config.fix_dame_enabled else "Fix: OFF"
@@ -1151,7 +1226,9 @@ class KeybindsWidget(QWidget):
         else:
             rem = exp_at - time.time()
             if rem <= 0:
-                time_badge = '<span style="color:#ef4444; font-size:9.5px;">[Hết hạn]</span>'
+                self.countdown_timer.stop()
+                signals.key_expired.emit()
+                return
             else:
                 days = int(rem // 86400)
                 hrs = int((rem % 86400) // 3600)
@@ -1406,17 +1483,20 @@ class MainContainerWindow(QWidget):
         self.download_view = DownloadWidget(self.on_inject_clicked, cleanup_and_exit)
         self.init_view = InitializingWidget(self.on_init_finished)
         self.keybinds_view = KeybindsWidget(cleanup_and_exit)
+        self.expired_view = KeyExpiredWidget(self.on_expired_relogin, cleanup_and_exit)
 
-        self.stack.addWidget(self.init_gui_view)
-        self.stack.addWidget(self.adb_loading_view)
-        self.stack.addWidget(self.login_view)
-        self.stack.addWidget(self.download_view)
-        self.stack.addWidget(self.init_view)
-        self.stack.addWidget(self.keybinds_view)
+        self.stack.addWidget(self.init_gui_view)      # 0
+        self.stack.addWidget(self.adb_loading_view)    # 1
+        self.stack.addWidget(self.login_view)          # 2
+        self.stack.addWidget(self.download_view)       # 3
+        self.stack.addWidget(self.init_view)           # 4
+        self.stack.addWidget(self.keybinds_view)       # 5
+        self.stack.addWidget(self.expired_view)        # 6
 
         self.stack.setCurrentIndex(0)
 
         signals.toggle_visibility.connect(self.toggle_visibility)
+        signals.key_expired.connect(self.handle_key_expired)
         self._drag = False
         self._pos = None
 
@@ -1441,7 +1521,37 @@ class MainContainerWindow(QWidget):
         net_state.is_injected = True
         self.keybinds_view.update_key_expiry_display()
         self.keybinds_view.update_fix_mode_btn()
+        self.keybinds_view.start_timer()
         self.stack.setCurrentIndex(5)
+
+    def handle_key_expired(self):
+        # Tắt toàn bộ Fake Lag & thu hồi xác thực
+        with net_state.lock:
+            net_state.tele_mode = False
+            net_state.freeze_mode = False
+            net_state.ghost_mode = False
+            net_state.tele_active_time = 0.0
+            net_state.freeze_active_time = 0.0
+            net_state.ghost_active_time = 0.0
+
+        net_state.is_authenticated = False
+        net_state.is_injected = False
+
+        audio.play_off()
+        signals.notify.emit('Freeze', False)
+        signals.notify.emit('Telekill', False)
+        signals.notify.emit('Ghost', False)
+
+        # Hiện giao diện lên màn hình và chuyển sang màn hình thông báo hết hạn
+        if not self.isVisible():
+            self.show()
+        self.raise_()
+        self.activateWindow()
+        self.stack.setCurrentIndex(6)
+
+    def on_expired_relogin(self):
+        self.login_view.status_msg.setText("")
+        self.stack.setCurrentIndex(2)
 
     def toggle_visibility(self):
         if self.isVisible(): self.hide()
