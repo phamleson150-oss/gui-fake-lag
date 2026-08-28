@@ -23,10 +23,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QPointF, QTimer
 from PyQt6.QtGui import QColor, QPainter, QBrush, QPen, QFont, QLinearGradient, QRadialGradient
 
-# ================= CẤU HÌNH XÁC THỰC VPS =================
+# ================= CẤU HÌNH HỆ THỐNG =================
 VPS_VERIFY_URL = "http://103.78.3.222:53689/api/verify_key"
 GET_KEY_URL = "http://103.78.3.222:53689/"
-API_URL = "http://103.78.3.222:53689/api/verify_key"
 LICENSE_FILE = "zerox_license.json"
 
 def get_current_hwid():
@@ -69,10 +68,10 @@ def verify_key_with_vps(key_str):
         msg = res_data.get("msg", "Lỗi xác thực")
         expires_at = res_data.get("expires_at", -1)
         return valid, msg, expires_at
-    except Exception as e:
-        return False, f"Lỗi kết nối VPS!", 0
+    except Exception:
+        return False, "Lỗi kết nối VPS!", 0
 
-# ================= WIN32 DYNAMIC EMULATOR DETECTOR =================
+# ================= WIN32 EMULATOR DETECTOR =================
 class RECT(ctypes.Structure):
     _fields_ = [
         ("left", wintypes.LONG),
@@ -131,8 +130,11 @@ def find_emulator_window():
 # ================= CONFIG & NETWORK ENGINE =================
 HOTKEY_FILE = 'zerox_hotkey.json'
 MASTER_FILTER = "udp and ((udp.DstPort >= 7000 and udp.DstPort <= 18000) or (udp.SrcPort >= 7000 and udp.SrcPort <= 18000))"
-MAX_QUEUE_SIZE = 220            
-FREEZE_AUTO_DISABLE_SEC = 1.5   
+MAX_QUEUE_SIZE = 150
+
+FREEZE_AUTO_DISABLE_SEC = 1.5
+TELE_AUTO_DISABLE_SEC = 2.0
+GHOST_AUTO_DISABLE_SEC = 2.5
 
 def debug_log(msg):
     try:
@@ -231,12 +233,13 @@ class NetState:
         self.key_expires_at = -1
         self.total_passed = 0
         self.freeze_active_time = 0.0
+        self.tele_active_time = 0.0
+        self.ghost_active_time = 0.0
 
 net_state = NetState()
 
 # ================= DIVERTER ENGINE =================
 def master_divert_worker():
-    outbound_queue = deque(maxlen=MAX_QUEUE_SIZE)
     inbound_queue = deque(maxlen=MAX_QUEUE_SIZE)
 
     while net_state.running:
@@ -257,14 +260,7 @@ def master_divert_worker():
                         block_in = net_state.freeze_mode or net_state.ghost_mode
 
                     if is_out:
-                        if block_out:
-                            outbound_queue.append(packet)
-                        else:
-                            while outbound_queue:
-                                try:
-                                    handle.send(outbound_queue.popleft())
-                                except Exception:
-                                    pass
+                        if not block_out:
                             handle.send(packet)
                             net_state.total_passed += 1
                     else:
@@ -282,17 +278,19 @@ def master_divert_worker():
             debug_log(f"Divert error: {e}")
             time.sleep(0.1)
 
-# ================= HOTKEY TOGGLE CONTROLLER =================
+# ================= HOTKEY CONTROLLER =================
 def toggle_tele():
     if not net_state.is_injected: return
     with net_state.lock:
         if net_state.tele_mode:
             net_state.tele_mode = False
+            net_state.tele_active_time = 0.0
             active = False
         else:
             net_state.tele_mode = True
             net_state.freeze_mode = False
             net_state.ghost_mode = False
+            net_state.tele_active_time = time.time()
             active = True
 
     (audio.play_on if active else audio.play_off)()
@@ -324,11 +322,13 @@ def toggle_ghost():
     with net_state.lock:
         if net_state.ghost_mode:
             net_state.ghost_mode = False
+            net_state.ghost_active_time = 0.0
             active = False
         else:
             net_state.ghost_mode = True
             net_state.tele_mode = False
             net_state.freeze_mode = False
+            net_state.ghost_active_time = time.time()
             active = True
 
     (audio.play_on if active else audio.play_off)()
@@ -348,6 +348,10 @@ def hotkey_loop():
             with net_state.lock:
                 is_freeze = net_state.freeze_mode
                 f_time = net_state.freeze_active_time
+                is_tele = net_state.tele_mode
+                t_time = net_state.tele_active_time
+                is_ghost = net_state.ghost_mode
+                g_time = net_state.ghost_active_time
 
             if is_freeze and f_time > 0 and (curr_t - f_time >= FREEZE_AUTO_DISABLE_SEC):
                 with net_state.lock:
@@ -355,6 +359,20 @@ def hotkey_loop():
                     net_state.freeze_active_time = 0.0
                 audio.play_off()
                 signals.notify.emit('Freeze', False)
+
+            if is_tele and t_time > 0 and (curr_t - t_time >= TELE_AUTO_DISABLE_SEC):
+                with net_state.lock:
+                    net_state.tele_mode = False
+                    net_state.tele_active_time = 0.0
+                audio.play_off()
+                signals.notify.emit('Telekill', False)
+
+            if is_ghost and g_time > 0 and (curr_t - g_time >= GHOST_AUTO_DISABLE_SEC):
+                with net_state.lock:
+                    net_state.ghost_mode = False
+                    net_state.ghost_active_time = 0.0
+                audio.play_off()
+                signals.notify.emit('Ghost', False)
 
             cur_t = keyboard.is_pressed(app_config.tele_hotkey.key)
             if cur_t and not tp: toggle_tele()
@@ -383,173 +401,60 @@ def hotkey_loop():
         except Exception:
             time.sleep(0.1)
 
-# ================= UI OVERLAYS & WINDOWS =================
-class RainbowHeaderOverlay(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.setWindowFlags(
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.Tool |
-            Qt.WindowType.WindowTransparentForInput
-        )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.setFixedSize(220, 24)
-
-        self.hue_offset = 0.0
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.animate_rainbow)
-        self.timer.start(33)
-
-        self.target_hwnd = None
-        self.track_timer = QTimer(self)
-        self.track_timer.timeout.connect(self.sync_bottom_position)
-
-        signals.stream_toggle.connect(lambda enabled: self.hide() if enabled else self.show())
-        signals.start_tracking.connect(self.enable_tracking)
-
-    def enable_tracking(self):
-        hwnd, _ = find_emulator_window()
-        self.target_hwnd = hwnd
-        self.track_timer.start(25)
-        self.show()
-
-    def sync_bottom_position(self):
-        if not self.target_hwnd or not ctypes.windll.user32.IsWindow(self.target_hwnd):
-            hwnd, _ = find_emulator_window()
-            self.target_hwnd = hwnd
-            if not self.target_hwnd:
-                return
-
-        if ctypes.windll.user32.IsIconic(self.target_hwnd) or not ctypes.windll.user32.IsWindowVisible(self.target_hwnd):
-            if self.isVisible(): self.hide()
-            return
-
-        rect = RECT()
-        ctypes.windll.user32.GetClientRect(self.target_hwnd, ctypes.byref(rect))
-        client_w = rect.right - rect.left
-        client_h = rect.bottom - rect.top
-
-        pt = POINT(0, 0)
-        ctypes.windll.user32.ClientToScreen(self.target_hwnd, ctypes.byref(pt))
-
-        if pt.x < -10000 or pt.y < -10000:
-            if self.isVisible(): self.hide()
-            return
-
-        if not app_config.stream_mode and not self.isVisible():
-            self.show()
-
-        target_x = pt.x + (client_w - self.width()) // 2
-        target_y = pt.y + client_h - 26
-        self.move(target_x, target_y)
-
-    def animate_rainbow(self):
-        self.hue_offset = (self.hue_offset + 0.006) % 1.0
-        self.update()
+# ================= UI WIDGETS & COMPONENTS =================
+class GlowingCircleDot(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(14, 14)
 
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        font = QFont("Segoe UI", 11, QFont.Weight.Black)
-        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.5)
-        p.setFont(font)
-
-        grad = QLinearGradient(0, 0, self.width(), 0)
-        for i in range(8):
-            stop_pos = i / 7.0
-            hue = (self.hue_offset + stop_pos) % 1.0
-            grad.setColorAt(stop_pos, QColor.fromHsvF(hue, 0.9, 1.0))
-
-        p.setPen(QPen(QBrush(grad), 1))
-        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "ZeroX Mods")
+        p.setPen(Qt.PenStyle.NoPen)
+        cx, cy = self.width() / 2.0, self.height() / 2.0
+        glow = QRadialGradient(cx, cy, 6.5)
+        glow.setColorAt(0.0, QColor(0, 255, 102, 180))
+        glow.setColorAt(0.5, QColor(0, 255, 102, 60))
+        glow.setColorAt(1.0, QColor(0, 255, 102, 0))
+        p.setBrush(QBrush(glow))
+        p.drawEllipse(QPointF(cx, cy), 6.5, 6.5)
+        p.setBrush(QBrush(QColor("#00ff66")))
+        p.drawEllipse(QPointF(cx, cy), 2.8, 2.8)
         p.end()
 
-class OverlayHUD(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.setWindowFlags(
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.Tool |
-            Qt.WindowType.WindowTransparentForInput
-        )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.setFixedSize(160, 180)
+class TopBar(QWidget):
+    def __init__(self, title_text, on_close=None, on_minimize=None, on_logo_click=None, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(24)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 0, 8, 0)
+        layout.setSpacing(6)
 
-        self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(0, 0, 0, 0)
-        self.layout.setSpacing(5)
-        self.layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(GlowingCircleDot())
 
-        self.items = {}
-        for key, text, color in [("Freeze", "FREEZE ACTIVE", "#00f0ff"),
-                                 ("Telekill", "TELEPKILL ACTIVE", "#7000ff"),
-                                 ("Ghost", "GHOST ACTIVE", "#00ff88")]:
-            lbl = QLabel(f" {text}")
-            lbl.setFixedHeight(22)
-            lbl.setStyleSheet(f"""
-                QLabel {{
-                    background-color: rgba(5, 7, 10, 0.85);
-                    color: #ffffff;
-                    font-size: 10px;
-                    font-weight: 800;
-                    font-family: 'Consolas', 'Segoe UI', Arial;
-                    padding-left: 6px;
-                    padding-right: 8px;
-                    border-left: 3px solid {color};
-                    border-radius: 3px;
-                }}
-            """)
-            lbl.hide()
-            self.layout.addWidget(lbl)
-            self.items[key] = lbl
+        self.title_lbl = QLabel(title_text)
+        self.title_lbl.setStyleSheet("color: #d1d5db; font-size: 10px; font-weight: 700; font-family: 'Consolas', 'Segoe UI', Arial; background: transparent; border: none;")
+        if on_logo_click:
+            self.title_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.title_lbl.mousePressEvent = lambda e: on_logo_click()
+        layout.addWidget(self.title_lbl)
+        layout.addStretch()
 
-        self.target_hwnd = None
-        self.track_timer = QTimer(self)
-        self.track_timer.timeout.connect(self.sync_position_with_game)
+        if on_minimize:
+            min_btn = QPushButton("—")
+            min_btn.setFixedSize(16, 16)
+            min_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            min_btn.setStyleSheet("QPushButton { background: transparent; color: #6b7280; border: none; font-size: 10px; font-weight: bold; } QPushButton:hover { color: #ffffff; }")
+            min_btn.clicked.connect(on_minimize)
+            layout.addWidget(min_btn)
 
-        signals.notify.connect(self.on_notify)
-        signals.stream_toggle.connect(lambda enabled: self.hide() if enabled else self.show())
-        signals.start_tracking.connect(self.enable_tracking)
-
-    def enable_tracking(self):
-        hwnd, _ = find_emulator_window()
-        self.target_hwnd = hwnd
-        self.track_timer.start(25)
-        self.show()
-
-    def sync_position_with_game(self):
-        if not self.target_hwnd or not ctypes.windll.user32.IsWindow(self.target_hwnd):
-            hwnd, _ = find_emulator_window()
-            self.target_hwnd = hwnd
-            if not self.target_hwnd:
-                return
-
-        if ctypes.windll.user32.IsIconic(self.target_hwnd) or not ctypes.windll.user32.IsWindowVisible(self.target_hwnd):
-            if self.isVisible(): self.hide()
-            return
-
-        pt = POINT(0, 0)
-        ctypes.windll.user32.ClientToScreen(self.target_hwnd, ctypes.byref(pt))
-
-        if pt.x < -10000 or pt.y < -10000:
-            if self.isVisible(): self.hide()
-            return
-
-        if not app_config.stream_mode and not self.isVisible():
-            self.show()
-
-        self.move(pt.x + 20, pt.y + 85)
-
-    def on_notify(self, feature, enabled):
-        if app_config.stream_mode: return
-        if feature in self.items:
-            self.items[feature].setVisible(enabled)
-            self.adjustSize()
+        if on_close:
+            close_btn = QPushButton("✕")
+            close_btn.setFixedSize(16, 16)
+            close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            close_btn.setStyleSheet("QPushButton { background: transparent; color: #6b7280; border: none; font-size: 11px; font-weight: bold; } QPushButton:hover { color: #ef4444; }")
+            close_btn.clicked.connect(on_close)
+            layout.addWidget(close_btn)
 
 class Particle:
     def __init__(self, w, h):
@@ -572,10 +477,10 @@ class Particle:
 class CustomParticleFrame(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.particles = [Particle(340, 240) for _ in range(30)] # Giảm số hạt để mượt hơn
+        self.particles = [Particle(340, 240) for _ in range(30)]
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.animate_particles)
-        self.timer.start(33) # Đưa về ~30 FPS để chống giật khi kéo cửa sổ
+        self.timer.start(33)
 
     def animate_particles(self):
         w, h = self.width(), self.height()
@@ -621,60 +526,6 @@ class CustomProgressBar(QWidget):
             p.drawRoundedRect(0, 0, max(fill_w, 4), self.height(), 2, 2)
         p.end()
 
-class GlowingCircleDot(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedSize(14, 14)
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(Qt.PenStyle.NoPen)
-        cx, cy = self.width() / 2.0, self.height() / 2.0
-
-        glow = QRadialGradient(cx, cy, 6.5)
-        glow.setColorAt(0.0, QColor(0, 255, 102, 180))
-        glow.setColorAt(0.5, QColor(0, 255, 102, 60))
-        glow.setColorAt(1.0, QColor(0, 255, 102, 0))
-        p.setBrush(QBrush(glow))
-        p.drawEllipse(QPointF(cx, cy), 6.5, 6.5)
-
-        p.setBrush(QBrush(QColor("#00ff66")))
-        p.drawEllipse(QPointF(cx, cy), 2.8, 2.8)
-        p.end()
-
-class TopBar(QWidget):
-    def __init__(self, title_text, on_close=None, on_minimize=None, parent=None):
-        super().__init__(parent)
-        self.setFixedHeight(24)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 0, 8, 0)
-        layout.setSpacing(6)
-
-        self.dot = GlowingCircleDot()
-        layout.addWidget(self.dot)
-
-        self.title_lbl = QLabel(title_text)
-        self.title_lbl.setStyleSheet("color: #d1d5db; font-size: 10px; font-weight: 700; font-family: 'Consolas', 'Segoe UI', Arial;")
-        layout.addWidget(self.title_lbl)
-        layout.addStretch()
-
-        if on_minimize:
-            self.min_btn = QPushButton("—")
-            self.min_btn.setFixedSize(16, 16)
-            self.min_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            self.min_btn.setStyleSheet("QPushButton { background: transparent; color: #6b7280; border: none; font-size: 10px; font-weight: bold; } QPushButton:hover { color: #ffffff; }")
-            self.min_btn.clicked.connect(on_minimize)
-            layout.addWidget(self.min_btn)
-
-        if on_close:
-            self.close_btn = QPushButton("✕")
-            self.close_btn.setFixedSize(16, 16)
-            self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            self.close_btn.setStyleSheet("QPushButton { background: transparent; color: #6b7280; border: none; font-size: 11px; font-weight: bold; } QPushButton:hover { color: #ef4444; }")
-            self.close_btn.clicked.connect(on_close)
-            layout.addWidget(self.close_btn)
-
 class LoginWidget(QWidget):
     def __init__(self, on_login_success, on_close_callback, on_minimize_callback, parent=None):
         super().__init__(parent)
@@ -684,7 +535,7 @@ class LoginWidget(QWidget):
         layout.setContentsMargins(14, 8, 14, 14)
         layout.setSpacing(5)
 
-        layout.addWidget(TopBar("ZeroX Cheat  /   Login", on_close_callback, on_minimize_callback))
+        layout.addWidget(TopBar("ZeroX Cheat  /   Login", on_close=on_close_callback, on_minimize=on_minimize_callback))
         layout.addSpacing(6)
 
         lbl_key = QLabel("LICENSE KEY")
@@ -809,7 +660,7 @@ class DownloadWidget(QWidget):
         layout.setContentsMargins(10, 8, 10, 14)
         layout.setSpacing(0)
 
-        layout.addWidget(TopBar("NETCHEAT LOADER", on_close_callback))
+        layout.addWidget(TopBar("NETCHEAT LOADER", on_close=on_close_callback))
         layout.addSpacing(22)
 
         self.status_lbl = QLabel("Downloading...")
@@ -978,7 +829,7 @@ class KeybindsWidget(QWidget):
         layout.setContentsMargins(14, 8, 14, 12)
         layout.setSpacing(6)
 
-        self.top_bar = TopBar("KEYBINDS", on_close_callback)
+        self.top_bar = TopBar("KEYBINDS", on_close=on_close_callback)
         layout.addWidget(self.top_bar)
         layout.addSpacing(6)
 
@@ -1097,6 +948,174 @@ class KeybindsWidget(QWidget):
         self.sound_btn.setText("Sound: ON" if app_config.beep_enabled else "Sound: OFF")
         save_config()
 
+# ================= OVERLAYS & CONTAINER WINDOW =================
+class RainbowHeaderOverlay(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowFlags(
+            Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.Tool |
+            Qt.WindowType.WindowTransparentForInput
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setFixedSize(220, 24)
+
+        self.hue_offset = 0.0
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.animate_rainbow)
+        self.timer.start(33)
+
+        self.target_hwnd = None
+        self.track_timer = QTimer(self)
+        self.track_timer.timeout.connect(self.sync_bottom_position)
+
+        signals.stream_toggle.connect(lambda enabled: self.hide() if enabled else self.show())
+        signals.start_tracking.connect(self.enable_tracking)
+
+    def enable_tracking(self):
+        hwnd, _ = find_emulator_window()
+        self.target_hwnd = hwnd
+        self.track_timer.start(25)
+        self.show()
+
+    def sync_bottom_position(self):
+        if not self.target_hwnd or not ctypes.windll.user32.IsWindow(self.target_hwnd):
+            hwnd, _ = find_emulator_window()
+            self.target_hwnd = hwnd
+            if not self.target_hwnd:
+                return
+
+        if ctypes.windll.user32.IsIconic(self.target_hwnd) or not ctypes.windll.user32.IsWindowVisible(self.target_hwnd):
+            if self.isVisible(): self.hide()
+            return
+
+        rect = RECT()
+        ctypes.windll.user32.GetClientRect(self.target_hwnd, ctypes.byref(rect))
+        client_w = rect.right - rect.left
+        client_h = rect.bottom - rect.top
+
+        pt = POINT(0, 0)
+        ctypes.windll.user32.ClientToScreen(self.target_hwnd, ctypes.byref(pt))
+
+        if pt.x < -10000 or pt.y < -10000:
+            if self.isVisible(): self.hide()
+            return
+
+        if not app_config.stream_mode and not self.isVisible():
+            self.show()
+
+        target_x = pt.x + (client_w - self.width()) // 2
+        target_y = pt.y + client_h - 26
+        self.move(target_x, target_y)
+
+    def animate_rainbow(self):
+        self.hue_offset = (self.hue_offset + 0.006) % 1.0
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        font = QFont("Segoe UI", 11, QFont.Weight.Black)
+        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.5)
+        p.setFont(font)
+
+        grad = QLinearGradient(0, 0, self.width(), 0)
+        for i in range(8):
+            stop_pos = i / 7.0
+            hue = (self.hue_offset + stop_pos) % 1.0
+            grad.setColorAt(stop_pos, QColor.fromHsvF(hue, 0.9, 1.0))
+
+        p.setPen(QPen(QBrush(grad), 1))
+        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "ZeroX Mods")
+        p.end()
+
+class OverlayHUD(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowFlags(
+            Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.Tool |
+            Qt.WindowType.WindowTransparentForInput
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setFixedSize(160, 180)
+
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(5)
+        self.layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+
+        self.items = {}
+        for key, text, color in [("Freeze", "FREEZE ACTIVE", "#00f0ff"),
+                                 ("Telekill", "TELEPKILL ACTIVE", "#7000ff"),
+                                 ("Ghost", "GHOST ACTIVE", "#00ff88")]:
+            lbl = QLabel(f" {text}")
+            lbl.setFixedHeight(22)
+            lbl.setStyleSheet(f"""
+                QLabel {{
+                    background-color: rgba(5, 7, 10, 0.85);
+                    color: #ffffff;
+                    font-size: 10px;
+                    font-weight: 800;
+                    font-family: 'Consolas', 'Segoe UI', Arial;
+                    padding-left: 6px;
+                    padding-right: 8px;
+                    border-left: 3px solid {color};
+                    border-radius: 3px;
+                }}
+            """)
+            lbl.hide()
+            self.layout.addWidget(lbl)
+            self.items[key] = lbl
+
+        self.target_hwnd = None
+        self.track_timer = QTimer(self)
+        self.track_timer.timeout.connect(self.sync_position_with_game)
+
+        signals.notify.connect(self.on_notify)
+        signals.stream_toggle.connect(lambda enabled: self.hide() if enabled else self.show())
+        signals.start_tracking.connect(self.enable_tracking)
+
+    def enable_tracking(self):
+        hwnd, _ = find_emulator_window()
+        self.target_hwnd = hwnd
+        self.track_timer.start(25)
+        self.show()
+
+    def sync_position_with_game(self):
+        if not self.target_hwnd or not ctypes.windll.user32.IsWindow(self.target_hwnd):
+            hwnd, _ = find_emulator_window()
+            self.target_hwnd = hwnd
+            if not self.target_hwnd:
+                return
+
+        if ctypes.windll.user32.IsIconic(self.target_hwnd) or not ctypes.windll.user32.IsWindowVisible(self.target_hwnd):
+            if self.isVisible(): self.hide()
+            return
+
+        pt = POINT(0, 0)
+        ctypes.windll.user32.ClientToScreen(self.target_hwnd, ctypes.byref(pt))
+
+        if pt.x < -10000 or pt.y < -10000:
+            if self.isVisible(): self.hide()
+            return
+
+        if not app_config.stream_mode and not self.isVisible():
+            self.show()
+
+        self.move(pt.x + 20, pt.y + 85)
+
+    def on_notify(self, feature, enabled):
+        if app_config.stream_mode: return
+        if feature in self.items:
+            self.items[feature].setVisible(enabled)
+            self.adjustSize()
+
 class MainContainerWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -1119,10 +1138,14 @@ class MainContainerWindow(QWidget):
         self.init_view = InitializingWidget(self.on_init_finished)
         self.keybinds_view = KeybindsWidget(cleanup_and_exit)
 
-        self.stack.addWidget(self.login_view)      
-        self.stack.addWidget(self.download_view)   
-        self.stack.addWidget(self.init_view)       
-        self.stack.addWidget(self.keybinds_view)   
+        # Index 0: Login, Index 1: Download, Index 2: Init, Index 3: Keybinds
+        self.stack.addWidget(self.login_view)
+        self.stack.addWidget(self.download_view)
+        self.stack.addWidget(self.init_view)
+        self.stack.addWidget(self.keybinds_view)
+
+        # Mở thẳng màn hình Đăng nhập (Login)
+        self.stack.setCurrentIndex(0)
 
         signals.toggle_visibility.connect(self.toggle_visibility)
         self._drag = False
