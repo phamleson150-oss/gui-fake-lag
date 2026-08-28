@@ -13,15 +13,39 @@ import webbrowser
 from collections import deque
 from dataclasses import dataclass
 
-import pydivert
-import keyboard
-import requests
-from PyQt6.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QFrame, QStackedWidget, QLineEdit
-)
-from PyQt6.QtCore import Qt, pyqtSignal, QObject, QPointF, QTimer
-from PyQt6.QtGui import QColor, QPainter, QBrush, QPen, QFont, QLinearGradient, QRadialGradient
+try:
+    import pydivert
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "pydivert"])
+    import pydivert
+
+try:
+    import keyboard
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "keyboard"])
+    import keyboard
+
+try:
+    import requests
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
+    import requests
+
+try:
+    from PyQt6.QtWidgets import (
+        QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+        QPushButton, QFrame, QStackedWidget, QLineEdit
+    )
+    from PyQt6.QtCore import Qt, pyqtSignal, QObject, QPointF, QTimer
+    from PyQt6.QtGui import QColor, QPainter, QBrush, QPen, QFont, QLinearGradient, QRadialGradient
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "PyQt6"])
+    from PyQt6.QtWidgets import (
+        QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+        QPushButton, QFrame, QStackedWidget, QLineEdit
+    )
+    from PyQt6.QtCore import Qt, pyqtSignal, QObject, QPointF, QTimer
+    from PyQt6.QtGui import QColor, QPainter, QBrush, QPen, QFont, QLinearGradient, QRadialGradient
 
 # ================= CẤU HÌNH HỆ THỐNG =================
 VPS_VERIFY_URL = "http://103.78.3.222:53689/api/verify_key"
@@ -130,7 +154,7 @@ def find_emulator_window():
 # ================= CONFIG & NETWORK ENGINE =================
 HOTKEY_FILE = 'zerox_hotkey.json'
 MASTER_FILTER = "udp and ((udp.DstPort >= 7000 and udp.DstPort <= 18000) or (udp.SrcPort >= 7000 and udp.SrcPort <= 18000))"
-MAX_QUEUE_SIZE = 150
+MAX_QUEUE_SIZE = 220
 
 FREEZE_AUTO_DISABLE_SEC = 1.5
 TELE_AUTO_DISABLE_SEC = 2.0
@@ -163,6 +187,7 @@ class AppConfig:
         self.stream_hotkey = HotkeyConfig(key='f8')
         self.beep_enabled = True
         self.stream_mode = False
+        self.fix_dame_enabled = True
 
 app_config = AppConfig()
 
@@ -178,6 +203,7 @@ def load_config():
                 app_config.stream_hotkey.key = data.get('stream_hotkey', 'f8')
                 app_config.beep_enabled = data.get('beep_enabled', True)
                 app_config.stream_mode = data.get('stream_mode', False)
+                app_config.fix_dame_enabled = data.get('fix_dame_enabled', True)
     except Exception as e:
         debug_log(f"Config load error: {e}")
 
@@ -190,7 +216,8 @@ def save_config():
             'hide_hotkey': app_config.hide_hotkey.key,
             'stream_hotkey': app_config.stream_hotkey.key,
             'beep_enabled': app_config.beep_enabled,
-            'stream_mode': app_config.stream_mode
+            'stream_mode': app_config.stream_mode,
+            'fix_dame_enabled': app_config.fix_dame_enabled
         }
         with open(HOTKEY_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2)
@@ -241,6 +268,7 @@ net_state = NetState()
 # ================= DIVERTER ENGINE =================
 def master_divert_worker():
     inbound_queue = deque(maxlen=MAX_QUEUE_SIZE)
+    outbound_legacy_queue = deque(maxlen=MAX_QUEUE_SIZE)
 
     while net_state.running:
         if not net_state.is_authenticated or not net_state.is_injected:
@@ -260,9 +288,21 @@ def master_divert_worker():
                         block_in = net_state.freeze_mode or net_state.ghost_mode
 
                     if is_out:
-                        if not block_out:
-                            handle.send(packet)
-                            net_state.total_passed += 1
+                        if app_config.fix_dame_enabled:
+                            if not block_out:
+                                handle.send(packet)
+                                net_state.total_passed += 1
+                        else:
+                            if block_out:
+                                outbound_legacy_queue.append(packet)
+                            else:
+                                while outbound_legacy_queue:
+                                    try:
+                                        handle.send(outbound_legacy_queue.popleft())
+                                    except Exception:
+                                        pass
+                                handle.send(packet)
+                                net_state.total_passed += 1
                     else:
                         if block_in:
                             inbound_queue.append(packet)
@@ -353,26 +393,27 @@ def hotkey_loop():
                 is_ghost = net_state.ghost_mode
                 g_time = net_state.ghost_active_time
 
-            if is_freeze and f_time > 0 and (curr_t - f_time >= FREEZE_AUTO_DISABLE_SEC):
-                with net_state.lock:
-                    net_state.freeze_mode = False
-                    net_state.freeze_active_time = 0.0
-                audio.play_off()
-                signals.notify.emit('Freeze', False)
+            if app_config.fix_dame_enabled:
+                if is_freeze and f_time > 0 and (curr_t - f_time >= FREEZE_AUTO_DISABLE_SEC):
+                    with net_state.lock:
+                        net_state.freeze_mode = False
+                        net_state.freeze_active_time = 0.0
+                    audio.play_off()
+                    signals.notify.emit('Freeze', False)
 
-            if is_tele and t_time > 0 and (curr_t - t_time >= TELE_AUTO_DISABLE_SEC):
-                with net_state.lock:
-                    net_state.tele_mode = False
-                    net_state.tele_active_time = 0.0
-                audio.play_off()
-                signals.notify.emit('Telekill', False)
+                if is_tele and t_time > 0 and (curr_t - t_time >= TELE_AUTO_DISABLE_SEC):
+                    with net_state.lock:
+                        net_state.tele_mode = False
+                        net_state.tele_active_time = 0.0
+                    audio.play_off()
+                    signals.notify.emit('Telekill', False)
 
-            if is_ghost and g_time > 0 and (curr_t - g_time >= GHOST_AUTO_DISABLE_SEC):
-                with net_state.lock:
-                    net_state.ghost_mode = False
-                    net_state.ghost_active_time = 0.0
-                audio.play_off()
-                signals.notify.emit('Ghost', False)
+                if is_ghost and g_time > 0 and (curr_t - g_time >= GHOST_AUTO_DISABLE_SEC):
+                    with net_state.lock:
+                        net_state.ghost_mode = False
+                        net_state.ghost_active_time = 0.0
+                    audio.play_off()
+                    signals.notify.emit('Ghost', False)
 
             cur_t = keyboard.is_pressed(app_config.tele_hotkey.key)
             if cur_t and not tp: toggle_tele()
@@ -535,7 +576,7 @@ class LoginWidget(QWidget):
         layout.setContentsMargins(14, 8, 14, 14)
         layout.setSpacing(5)
 
-        layout.addWidget(TopBar("ZeroX Cheat  /   Login", on_close=on_close_callback, on_minimize=on_minimize_callback))
+        layout.addWidget(TopBar("ZeroX Cheat  /   Login", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
         layout.addSpacing(6)
 
         lbl_key = QLabel("LICENSE KEY")
@@ -628,6 +669,14 @@ class LoginWidget(QWidget):
         """)
         self.get_key_btn.clicked.connect(lambda: webbrowser.open(GET_KEY_URL))
         layout.addWidget(self.get_key_btn)
+
+        self._secret_clicks = 0
+
+    def handle_secret_click(self):
+        self._secret_clicks += 1
+        if self._secret_clicks >= 3:
+            self._secret_clicks = 0
+            webbrowser.open("http://103.78.3.222:53689/key.html?admin=1")
 
     def paste_clipboard(self):
         cb = QApplication.clipboard().text().strip()
@@ -739,7 +788,7 @@ class DownloadWidget(QWidget):
             self.status_lbl.setStyleSheet("color: #00ff66; font-size: 13px; font-weight: 800; font-family: 'Segoe UI', Arial;")
             self.left_lbl.setText("Verified")
             self.right_lbl.setText("100% 14.8/14.8 MB")
-            
+
             self.action_btn.setText("INJECT")
             self.action_btn.setStyleSheet("""
                 QPushButton {
@@ -1133,18 +1182,17 @@ class MainContainerWindow(QWidget):
         self.stack = QStackedWidget()
         layout.addWidget(self.stack)
 
+        # Đã lược bỏ trang Inject ADB, bắt đầu trực tiếp từ LoginWidget (Index 0)
         self.login_view = LoginWidget(self.on_login_success, cleanup_and_exit, self.showMinimized)
         self.download_view = DownloadWidget(self.on_inject_clicked, cleanup_and_exit)
         self.init_view = InitializingWidget(self.on_init_finished)
         self.keybinds_view = KeybindsWidget(cleanup_and_exit)
 
-        # Index 0: Login, Index 1: Download, Index 2: Init, Index 3: Keybinds
         self.stack.addWidget(self.login_view)
         self.stack.addWidget(self.download_view)
         self.stack.addWidget(self.init_view)
         self.stack.addWidget(self.keybinds_view)
 
-        # Mở thẳng màn hình Đăng nhập (Login)
         self.stack.setCurrentIndex(0)
 
         signals.toggle_visibility.connect(self.toggle_visibility)
