@@ -1167,7 +1167,7 @@ class MainTabPage(QWidget):
         self.parent_widget = parent_widget
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setContentsMargins(4, 2, 4, 2)
         layout.setSpacing(5)
 
         self.btn_tele = self.create_key_row(layout, "TELEKILL", app_config.tele_hotkey, 'tele_hotkey')
@@ -1230,7 +1230,7 @@ class SettingTabPage(QWidget):
         self.parent_widget = parent_widget
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setContentsMargins(6, 6, 6, 2)
         layout.setSpacing(6)
 
         # Sound Button
@@ -1301,16 +1301,26 @@ class KeybindsWidget(QWidget):
         super().__init__(parent)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 6, 12, 10)
-        layout.setSpacing(5)
+        layout.setContentsMargins(12, 6, 12, 8)
+        layout.setSpacing(4)
 
+        # 1. Top Bar ở trên cùng
         self.top_bar = TopBar("KEYBINDS", on_close=on_close_callback)
         layout.addWidget(self.top_bar)
 
-        # Tab Selector Bar
+        # 2. Sliding Stacked Tab Body ở giữa
+        self.tab_stack = SlidingStackedWidget(self)
+        self.main_page = MainTabPage(self)
+        self.setting_page = SettingTabPage(self)
+
+        self.tab_stack.addWidget(self.main_page)
+        self.tab_stack.addWidget(self.setting_page)
+        layout.addWidget(self.tab_stack)
+
+        # 3. Tab Selector Bar được chuyển xuống dưới cùng
         tab_bar_layout = QHBoxLayout()
         tab_bar_layout.setSpacing(6)
-        tab_bar_layout.setContentsMargins(4, 2, 4, 2)
+        tab_bar_layout.setContentsMargins(4, 2, 4, 0)
 
         self.tab_main_btn = QPushButton("MAIN")
         self.tab_main_btn.setFixedHeight(24)
@@ -1326,15 +1336,6 @@ class KeybindsWidget(QWidget):
         tab_bar_layout.addWidget(self.tab_main_btn)
         tab_bar_layout.addWidget(self.tab_setting_btn)
         layout.addLayout(tab_bar_layout)
-
-        # Sliding Stacked Tab Body
-        self.tab_stack = SlidingStackedWidget(self)
-        self.main_page = MainTabPage(self)
-        self.setting_page = SettingTabPage(self)
-
-        self.tab_stack.addWidget(self.main_page)
-        self.tab_stack.addWidget(self.setting_page)
-        layout.addWidget(self.tab_stack)
 
         self.update_tab_buttons(0)
 
