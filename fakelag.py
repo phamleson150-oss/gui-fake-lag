@@ -673,7 +673,7 @@ class AdbLoadingWidget(QWidget):
         layout.setContentsMargins(14, 8, 14, 12)
         layout.setSpacing(4)
 
-        layout.addWidget(TopBar("INJECT LOADER", on_close=on_close_callback, on_minimize=on_minimize_callback))
+        layout.addWidget(TopBar("INJECT", on_close=on_close_callback, on_minimize=on_minimize_callback))
         layout.addSpacing(2)
 
         self.status_title = QLabel("Injecting ADB...")
