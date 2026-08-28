@@ -892,7 +892,7 @@ class DownloadWidget(QWidget):
         layout.setContentsMargins(10, 8, 10, 14)
         layout.setSpacing(0)
 
-        layout.addWidget(TopBar("ZEROX MODS LOADER", on_close=on_close_callback))
+        layout.addWidget(TopBar("ZEROX LOADER", on_close=on_close_callback))
         layout.addSpacing(22)
 
         self.status_lbl = QLabel("Downloading...")
