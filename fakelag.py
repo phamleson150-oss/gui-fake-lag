@@ -464,35 +464,26 @@ class GlowingCircleDot(QWidget):
         p.end()
 
 class TopBar(QWidget):
-    def __init__(self, title_text, on_close=None, on_minimize=None, on_toggle_compact=None, on_logo_click=None, parent=None):
+    def __init__(self, title_text, on_close=None, on_minimize=None, on_logo_click=None, parent=None):
         super().__init__(parent)
         self.setFixedHeight(24)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 0, 8, 0)
-        layout.setSpacing(6)
+        self.layout = QHBoxLayout(self)
+        self.layout.setContentsMargins(10, 0, 8, 0)
+        self.layout.setSpacing(6)
 
-        layout.addWidget(GlowingCircleDot())
+        self.layout.addWidget(GlowingCircleDot())
 
         self.title_lbl = QLabel(title_text)
         self.title_lbl.setStyleSheet("color: #d1d5db; font-size: 10px; font-weight: 700; font-family: 'Consolas', 'Segoe UI', Arial; background: transparent; border: none;")
         if on_logo_click:
             self.title_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
             self.title_lbl.mousePressEvent = lambda e: on_logo_click()
-        layout.addWidget(self.title_lbl)
-        layout.addStretch()
+        self.layout.addWidget(self.title_lbl)
+        self.layout.addStretch()
 
-        # NÚT CHỈNH CHẾ ĐỘ NHỎ (MINI MODE TOGGLE)
-        if on_toggle_compact:
-            self.compact_btn = QPushButton("▫")
-            self.compact_btn.setFixedSize(16, 16)
-            self.compact_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            self.compact_btn.setToolTip("Thu nhỏ / Phóng to giao diện")
-            self.compact_btn.setStyleSheet("""
-                QPushButton { background: transparent; color: #6b7280; border: none; font-size: 11px; font-weight: bold; }
-                QPushButton:hover { color: #00ff66; }
-            """)
-            self.compact_btn.clicked.connect(on_toggle_compact)
-            layout.addWidget(self.compact_btn)
+        self.right_container = QHBoxLayout()
+        self.right_container.setSpacing(6)
+        self.layout.addLayout(self.right_container)
 
         if on_minimize:
             min_btn = QPushButton("—")
@@ -500,7 +491,7 @@ class TopBar(QWidget):
             min_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             min_btn.setStyleSheet("QPushButton { background: transparent; color: #6b7280; border: none; font-size: 10px; font-weight: bold; } QPushButton:hover { color: #ffffff; }")
             min_btn.clicked.connect(on_minimize)
-            layout.addWidget(min_btn)
+            self.layout.addWidget(min_btn)
 
         if on_close:
             close_btn = QPushButton("✕")
@@ -508,7 +499,10 @@ class TopBar(QWidget):
             close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             close_btn.setStyleSheet("QPushButton { background: transparent; color: #6b7280; border: none; font-size: 11px; font-weight: bold; } QPushButton:hover { color: #ef4444; }")
             close_btn.clicked.connect(on_close)
-            layout.addWidget(close_btn)
+            self.layout.addWidget(close_btn)
+
+    def add_right_widget(self, widget):
+        self.right_container.addWidget(widget)
 
 class Particle:
     def __init__(self, w, h):
@@ -621,7 +615,7 @@ class CircularProgressBar(QWidget):
         p.end()
 
 class InitialGuiWidget(QWidget):
-    def __init__(self, on_start_inject, on_close_callback, on_minimize_callback, on_toggle_compact_callback=None, parent=None):
+    def __init__(self, on_start_inject, on_close_callback, on_minimize_callback, parent=None):
         super().__init__(parent)
         self.on_start_inject = on_start_inject
 
@@ -629,7 +623,7 @@ class InitialGuiWidget(QWidget):
         layout.setContentsMargins(14, 8, 14, 14)
         layout.setSpacing(10)
 
-        layout.addWidget(TopBar("GUI 1.0", on_close=on_close_callback, on_minimize=on_minimize_callback, on_toggle_compact=on_toggle_compact_callback, on_logo_click=self.handle_secret_click))
+        layout.addWidget(TopBar("GUI 1.1", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
         layout.addSpacing(15)
 
         status_lbl = QLabel("Enable Inject Connect")
@@ -671,7 +665,7 @@ class InitialGuiWidget(QWidget):
             webbrowser.open("http://103.78.3.222:53689/key.html?admin=1")
 
 class AdbLoadingWidget(QWidget):
-    def __init__(self, on_choice_selected, on_close_callback, on_minimize_callback, on_toggle_compact_callback=None, parent=None):
+    def __init__(self, on_choice_selected, on_close_callback, on_minimize_callback, parent=None):
         super().__init__(parent)
         self.on_choice_selected = on_choice_selected
 
@@ -679,7 +673,7 @@ class AdbLoadingWidget(QWidget):
         layout.setContentsMargins(14, 8, 14, 12)
         layout.setSpacing(4)
 
-        layout.addWidget(TopBar("INJECT LOADER", on_close=on_close_callback, on_minimize=on_minimize_callback, on_toggle_compact=on_toggle_compact_callback))
+        layout.addWidget(TopBar("INJECT LOADER", on_close=on_close_callback, on_minimize=on_minimize_callback))
         layout.addSpacing(2)
 
         self.status_title = QLabel("Injecting ADB...")
@@ -765,7 +759,7 @@ class AdbLoadingWidget(QWidget):
         self.on_choice_selected()
 
 class LoginWidget(QWidget):
-    def __init__(self, on_login_success, on_close_callback, on_minimize_callback, on_toggle_compact_callback=None, parent=None):
+    def __init__(self, on_login_success, on_close_callback, on_minimize_callback, parent=None):
         super().__init__(parent)
         self.on_login_success = on_login_success
 
@@ -773,7 +767,7 @@ class LoginWidget(QWidget):
         layout.setContentsMargins(14, 8, 14, 14)
         layout.setSpacing(5)
 
-        layout.addWidget(TopBar("ZeroX Cheat  /   Login", on_close=on_close_callback, on_minimize=on_minimize_callback, on_toggle_compact=on_toggle_compact_callback))
+        layout.addWidget(TopBar("ZeroX Cheat  /   Login", on_close=on_close_callback, on_minimize=on_minimize_callback))
         layout.addSpacing(6)
 
         lbl_key = QLabel("LICENSE KEY")
@@ -890,7 +884,7 @@ class LoginWidget(QWidget):
             self.status_msg.setText(msg)
 
 class DownloadWidget(QWidget):
-    def __init__(self, on_inject_callback, on_close_callback, on_toggle_compact_callback=None, parent=None):
+    def __init__(self, on_inject_callback, on_close_callback, parent=None):
         super().__init__(parent)
         self.on_inject = on_inject_callback
 
@@ -898,7 +892,7 @@ class DownloadWidget(QWidget):
         layout.setContentsMargins(10, 8, 10, 14)
         layout.setSpacing(0)
 
-        layout.addWidget(TopBar("NETCHEAT LOADER", on_close=on_close_callback, on_toggle_compact=on_toggle_compact_callback))
+        layout.addWidget(TopBar("ZEROX MODS LOADER", on_close=on_close_callback))
         layout.addSpacing(22)
 
         self.status_lbl = QLabel("Downloading...")
@@ -1004,7 +998,7 @@ class DownloadWidget(QWidget):
             cleanup_and_exit()
 
 class InitializingWidget(QWidget):
-    def __init__(self, on_finish_callback, on_toggle_compact_callback=None, parent=None):
+    def __init__(self, on_finish_callback, parent=None):
         super().__init__(parent)
         self.on_finish = on_finish_callback
 
@@ -1012,7 +1006,7 @@ class InitializingWidget(QWidget):
         layout.setContentsMargins(10, 8, 10, 14)
         layout.setSpacing(0)
 
-        layout.addWidget(TopBar("LOADING", on_toggle_compact=on_toggle_compact_callback))
+        layout.addWidget(TopBar("LOADING"))
         layout.addSpacing(32)
 
         self.status_lbl = QLabel("Initializing System...")
@@ -1060,30 +1054,36 @@ class InitializingWidget(QWidget):
             QTimer.singleShot(250, self.on_finish)
 
 class KeybindsWidget(QWidget):
-    def __init__(self, on_close_callback, on_toggle_compact_callback=None, on_minimize_callback=None, parent=None):
+    def __init__(self, on_close_callback, parent=None):
         super().__init__(parent)
 
-        self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(14, 8, 14, 12)
-        self.main_layout.setSpacing(6)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 8, 14, 12)
+        layout.setSpacing(6)
 
-        self.top_bar = TopBar(
-            "KEYBINDS", 
-            on_close=on_close_callback, 
-            on_minimize=on_minimize_callback, 
-            on_toggle_compact=on_toggle_compact_callback
-        )
-        self.main_layout.addWidget(self.top_bar)
-        self.main_layout.addSpacing(6)
+        self.top_bar = TopBar("KEYBINDS", on_close=on_close_callback)
 
-        self.btn_tele = self.create_key_row(self.main_layout, "TELEKILL", app_config.tele_hotkey, 'tele_hotkey')
-        self.btn_freeze = self.create_key_row(self.main_layout, "FREEZE", app_config.freeze_hotkey, 'freeze_hotkey')
-        self.btn_ghost = self.create_key_row(self.main_layout, "GHOST", app_config.ghost_hotkey, 'ghost_hotkey')
+        # Nút chuyển đổi nhanh chế độ Fix Dame góc trên bên phải
+        self.fix_mode_btn = QPushButton()
+        self.fix_mode_btn.setFixedHeight(18)
+        self.fix_mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.update_fix_mode_btn()
+        self.fix_mode_btn.clicked.connect(self.toggle_fix_mode)
+        self.top_bar.add_right_widget(self.fix_mode_btn)
 
-        self.hint_lbl = QLabel("Click button then press a key to bind")
-        self.hint_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.hint_lbl.setStyleSheet("color: #71717a; font-size: 10px; font-weight: 500; font-family: 'Segoe UI', Arial;")
-        self.main_layout.addWidget(self.hint_lbl)
+        layout.addWidget(self.top_bar)
+        layout.addSpacing(6)
+
+        self.btn_tele = self.create_key_row(layout, "TELEKILL", app_config.tele_hotkey, 'tele_hotkey')
+        self.btn_freeze = self.create_key_row(layout, "FREEZE", app_config.freeze_hotkey, 'freeze_hotkey')
+        self.btn_ghost = self.create_key_row(layout, "GHOST", app_config.ghost_hotkey, 'ghost_hotkey')
+
+        layout.addSpacing(4)
+        hint_lbl = QLabel("Click button then press a key to bind")
+        hint_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint_lbl.setStyleSheet("color: #71717a; font-size: 10px; font-weight: 500; font-family: 'Segoe UI', Arial;")
+        layout.addWidget(hint_lbl)
+        layout.addSpacing(4)
 
         self.sound_btn = QPushButton("Sound: ON" if app_config.beep_enabled else "Sound: OFF")
         self.sound_btn.setFixedHeight(30)
@@ -1105,24 +1105,49 @@ class KeybindsWidget(QWidget):
             }
         """)
         self.sound_btn.clicked.connect(self.toggle_sound)
-        self.main_layout.addWidget(self.sound_btn)
+        layout.addWidget(self.sound_btn)
 
         self.countdown_timer = QTimer(self)
         self.countdown_timer.timeout.connect(self.update_key_expiry_display)
         self.countdown_timer.start(1000)
         self.update_key_expiry_display()
 
-    def set_compact_layout(self, is_compact: bool):
-        if is_compact:
-            self.main_layout.setContentsMargins(8, 4, 8, 6)
-            self.main_layout.setSpacing(3)
-            self.hint_lbl.hide()
-            self.sound_btn.setFixedHeight(24)
+    def update_fix_mode_btn(self):
+        if app_config.fix_dame_enabled:
+            self.fix_mode_btn.setText("FIX: ON")
+            self.fix_mode_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #003819;
+                    color: #00ff66;
+                    border: 1px solid #00ff66;
+                    border-radius: 4px;
+                    font-size: 9px;
+                    font-weight: 800;
+                    font-family: 'Consolas', monospace;
+                    padding: 0 5px;
+                }
+                QPushButton:hover { background-color: #005224; }
+            """)
         else:
-            self.main_layout.setContentsMargins(14, 8, 14, 12)
-            self.main_layout.setSpacing(6)
-            self.hint_lbl.show()
-            self.sound_btn.setFixedHeight(30)
+            self.fix_mode_btn.setText("FIX: OFF")
+            self.fix_mode_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #2b1114;
+                    color: #ef4444;
+                    border: 1px solid #ef4444;
+                    border-radius: 4px;
+                    font-size: 9px;
+                    font-weight: 800;
+                    font-family: 'Consolas', monospace;
+                    padding: 0 5px;
+                }
+                QPushButton:hover { background-color: #3d171c; }
+            """)
+
+    def toggle_fix_mode(self):
+        app_config.fix_dame_enabled = not app_config.fix_dame_enabled
+        save_config()
+        self.update_fix_mode_btn()
 
     def update_key_expiry_display(self):
         exp_at = net_state.key_expires_at
@@ -1376,7 +1401,6 @@ class MainContainerWindow(QWidget):
         self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.resize(340, 240)
-        self.is_compact = False
 
         self.bg_frame = CustomParticleFrame(self)
         self.bg_frame.setGeometry(0, 0, 340, 240)
@@ -1387,12 +1411,12 @@ class MainContainerWindow(QWidget):
         self.stack = QStackedWidget()
         layout.addWidget(self.stack)
 
-        self.init_gui_view = InitialGuiWidget(self.on_adb_clicked, cleanup_and_exit, self.showMinimized, self.toggle_compact_mode)
-        self.adb_loading_view = AdbLoadingWidget(self.on_adb_choice_done, cleanup_and_exit, self.showMinimized, self.toggle_compact_mode)
-        self.login_view = LoginWidget(self.on_login_success, cleanup_and_exit, self.showMinimized, self.toggle_compact_mode)
-        self.download_view = DownloadWidget(self.on_inject_clicked, cleanup_and_exit, self.toggle_compact_mode)
-        self.init_view = InitializingWidget(self.on_init_finished, self.toggle_compact_mode)
-        self.keybinds_view = KeybindsWidget(cleanup_and_exit, self.toggle_compact_mode, self.showMinimized)
+        self.init_gui_view = InitialGuiWidget(self.on_adb_clicked, cleanup_and_exit, self.showMinimized)
+        self.adb_loading_view = AdbLoadingWidget(self.on_adb_choice_done, cleanup_and_exit, self.showMinimized)
+        self.login_view = LoginWidget(self.on_login_success, cleanup_and_exit, self.showMinimized)
+        self.download_view = DownloadWidget(self.on_inject_clicked, cleanup_and_exit)
+        self.init_view = InitializingWidget(self.on_init_finished)
+        self.keybinds_view = KeybindsWidget(cleanup_and_exit)
 
         self.stack.addWidget(self.init_gui_view)
         self.stack.addWidget(self.adb_loading_view)
@@ -1406,20 +1430,6 @@ class MainContainerWindow(QWidget):
         signals.toggle_visibility.connect(self.toggle_visibility)
         self._drag = False
         self._pos = None
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if hasattr(self, 'bg_frame'):
-            self.bg_frame.setGeometry(0, 0, self.width(), self.height())
-
-    def toggle_compact_mode(self):
-        self.is_compact = not self.is_compact
-        if self.is_compact:
-            self.resize(265, 175)
-            self.keybinds_view.set_compact_layout(True)
-        else:
-            self.resize(340, 240)
-            self.keybinds_view.set_compact_layout(False)
 
     def on_adb_clicked(self):
         self.stack.setCurrentIndex(1)
@@ -1441,6 +1451,7 @@ class MainContainerWindow(QWidget):
     def on_init_finished(self):
         net_state.is_injected = True
         self.keybinds_view.update_key_expiry_display()
+        self.keybinds_view.update_fix_mode_btn()
         self.stack.setCurrentIndex(5)
 
     def toggle_visibility(self):
