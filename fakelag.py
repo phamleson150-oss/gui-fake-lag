@@ -271,6 +271,24 @@ def master_divert_worker():
     inbound_queue = deque(maxlen=MAX_QUEUE_SIZE)
     outbound_legacy_queue = deque(maxlen=MAX_QUEUE_SIZE)
 
+    def flush_inbound(handle):
+        while inbound_queue:
+            try:
+                pkt = inbound_queue.popleft()
+                handle.send(pkt)
+                net_state.total_passed += 1
+            except Exception:
+                pass
+
+    def flush_outbound(handle):
+        while outbound_legacy_queue:
+            try:
+                pkt = outbound_legacy_queue.popleft()
+                handle.send(pkt)
+                net_state.total_passed += 1
+            except Exception:
+                pass
+
     while net_state.running:
         if not net_state.is_authenticated or not net_state.is_injected:
             time.sleep(0.05)
@@ -288,6 +306,14 @@ def master_divert_worker():
                         block_out = net_state.tele_mode or net_state.ghost_mode
                         block_in = net_state.freeze_mode or net_state.ghost_mode
 
+                    # Khi tắt chặn Inbound: xả toàn bộ gói tin để mạng mượt lại ngay lập tức
+                    if not block_in and inbound_queue:
+                        flush_inbound(handle)
+
+                    # Khi tắt chặn Outbound: xả toàn bộ gói tin đi
+                    if not block_out and outbound_legacy_queue:
+                        flush_outbound(handle)
+
                     if is_out:
                         if app_config.fix_dame_enabled:
                             if not block_out:
@@ -297,22 +323,12 @@ def master_divert_worker():
                             if block_out:
                                 outbound_legacy_queue.append(packet)
                             else:
-                                while outbound_legacy_queue:
-                                    try:
-                                        handle.send(outbound_legacy_queue.popleft())
-                                    except Exception:
-                                        pass
                                 handle.send(packet)
                                 net_state.total_passed += 1
                     else:
                         if block_in:
                             inbound_queue.append(packet)
                         else:
-                            while inbound_queue:
-                                try:
-                                    handle.send(inbound_queue.popleft())
-                                except Exception:
-                                    pass
                             handle.send(packet)
                             net_state.total_passed += 1
         except Exception as e:
@@ -323,59 +339,32 @@ def master_divert_worker():
 def toggle_tele():
     if not net_state.is_injected: return
     with net_state.lock:
-        if net_state.tele_mode:
-            net_state.tele_mode = False
-            net_state.tele_active_time = 0.0
-            active = False
-        else:
-            net_state.tele_mode = True
-            net_state.freeze_mode = False
-            net_state.ghost_mode = False
-            net_state.tele_active_time = time.time()
-            active = True
+        net_state.tele_mode = not net_state.tele_mode
+        net_state.tele_active_time = time.time() if net_state.tele_mode else 0.0
+        active = net_state.tele_mode
 
     (audio.play_on if active else audio.play_off)()
     signals.notify.emit('Telekill', active)
-    signals.notify.emit('Freeze', False)
-    signals.notify.emit('Ghost', False)
 
 def toggle_freeze():
     if not net_state.is_injected: return
     with net_state.lock:
-        if net_state.freeze_mode:
-            net_state.freeze_mode = False
-            net_state.freeze_active_time = 0.0
-            active = False
-        else:
-            net_state.freeze_mode = True
-            net_state.tele_mode = False
-            net_state.ghost_mode = False
-            net_state.freeze_active_time = time.time()
-            active = True
+        net_state.freeze_mode = not net_state.freeze_mode
+        net_state.freeze_active_time = time.time() if net_state.freeze_mode else 0.0
+        active = net_state.freeze_mode
 
     (audio.play_on if active else audio.play_off)()
     signals.notify.emit('Freeze', active)
-    signals.notify.emit('Telekill', False)
-    signals.notify.emit('Ghost', False)
 
 def toggle_ghost():
     if not net_state.is_injected: return
     with net_state.lock:
-        if net_state.ghost_mode:
-            net_state.ghost_mode = False
-            net_state.ghost_active_time = 0.0
-            active = False
-        else:
-            net_state.ghost_mode = True
-            net_state.tele_mode = False
-            net_state.freeze_mode = False
-            net_state.ghost_active_time = time.time()
-            active = True
+        net_state.ghost_mode = not net_state.ghost_mode
+        net_state.ghost_active_time = time.time() if net_state.ghost_mode else 0.0
+        active = net_state.ghost_mode
 
     (audio.play_on if active else audio.play_off)()
     signals.notify.emit('Ghost', active)
-    signals.notify.emit('Telekill', False)
-    signals.notify.emit('Freeze', False)
 
 def hotkey_loop():
     tp = gp = fp = hp = sp = False
@@ -1525,7 +1514,6 @@ class MainContainerWindow(QWidget):
         self.stack.setCurrentIndex(5)
 
     def handle_key_expired(self):
-        # Tắt toàn bộ Fake Lag & thu hồi xác thực
         with net_state.lock:
             net_state.tele_mode = False
             net_state.freeze_mode = False
@@ -1542,7 +1530,6 @@ class MainContainerWindow(QWidget):
         signals.notify.emit('Telekill', False)
         signals.notify.emit('Ghost', False)
 
-        # Hiện giao diện lên màn hình và chuyển sang màn hình thông báo hết hạn
         if not self.isVisible():
             self.show()
         self.raise_()
