@@ -972,7 +972,7 @@ class DownloadWidget(QWidget):
             self.left_lbl.setText("Verified")
             self.right_lbl.setText("100% 14.8/14.8 MB")
 
-            self.action_btn.setText("INJECT LOADER")
+            self.action_btn.setText("INJECT")
             self.action_btn.setStyleSheet("""
                 QPushButton {
                     background-color: #00873a;
