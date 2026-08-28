@@ -9,15 +9,13 @@ import json
 import random
 import subprocess
 import urllib.parse
-import urllib.request
 import webbrowser
-import tempfile
-import requests
 from collections import deque
 from dataclasses import dataclass
 
 import pydivert
 import keyboard
+import requests
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFrame, QStackedWidget, QLineEdit
@@ -25,24 +23,11 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QPointF, QTimer
 from PyQt6.QtGui import QColor, QPainter, QBrush, QPen, QFont, QLinearGradient, QRadialGradient
 
-# ================= ĐƯỜNG DẪN THƯ MỤC CÙNG FILE .EXE =================
-def get_app_dir():
-    if getattr(sys, 'frozen', False):
-        return os.path.dirname(sys.executable)
-    else:
-        return os.path.dirname(os.path.abspath(__file__))
-
-BASE_DIR = get_app_dir()
-LICENSE_FILE = os.path.join(BASE_DIR, "zerox_license.json")
-HOTKEY_FILE = os.path.join(BASE_DIR, "zerox_hotkey.json")
-LOG_FILE = os.path.join(BASE_DIR, "debug.log")
-
-# ================= CẤU HÌNH XÁC THỰC VPS & GITHUB SCRIPT =================
+# ================= CẤU HÌNH XÁC THỰC VPS =================
 VPS_VERIFY_URL = "http://103.78.3.222:53689/api/verify_key"
 GET_KEY_URL = "http://103.78.3.222:53689/"
-
-# THAY LINK RAW GITHUB CỦA BẠN VÀO ĐÂY ĐỂ TẢI KHI NHẤN INJECT ADB
-GITHUB_SCRIPT_URL = "https://raw.githubusercontent.com/username/repository/main/your_cheat_script.py"
+API_URL = "http://103.78.3.222:53689/api/verify_key"
+LICENSE_FILE = "zerox_license.json"
 
 def get_current_hwid():
     try:
@@ -84,8 +69,8 @@ def verify_key_with_vps(key_str):
         msg = res_data.get("msg", "Lỗi xác thực")
         expires_at = res_data.get("expires_at", -1)
         return valid, msg, expires_at
-    except Exception:
-        return False, "Không thể kết nối VPS 103.78.3.222:53689!", 0
+    except Exception as e:
+        return False, f"Lỗi kết nối VPS!", 0
 
 # ================= WIN32 DYNAMIC EMULATOR DETECTOR =================
 class RECT(ctypes.Structure):
@@ -144,13 +129,14 @@ def find_emulator_window():
     return detected[0] if detected else (None, "None")
 
 # ================= CONFIG & NETWORK ENGINE =================
+HOTKEY_FILE = 'zerox_hotkey.json'
 MASTER_FILTER = "udp and ((udp.DstPort >= 7000 and udp.DstPort <= 18000) or (udp.SrcPort >= 7000 and udp.SrcPort <= 18000))"
-MAX_QUEUE_SIZE = 220
-FREEZE_AUTO_DISABLE_SEC = 1.5
+MAX_QUEUE_SIZE = 220            
+FREEZE_AUTO_DISABLE_SEC = 1.5   
 
 def debug_log(msg):
     try:
-        with open(LOG_FILE, 'a', encoding='utf-8') as f:
+        with open('debug.log', 'a', encoding='utf-8') as f:
             f.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
     except Exception:
         pass
@@ -248,7 +234,7 @@ class NetState:
 
 net_state = NetState()
 
-# ================= FAST PACKET DIVERTER ENGINE =================
+# ================= DIVERTER ENGINE =================
 def master_divert_worker():
     outbound_queue = deque(maxlen=MAX_QUEUE_SIZE)
     inbound_queue = deque(maxlen=MAX_QUEUE_SIZE)
@@ -397,7 +383,7 @@ def hotkey_loop():
         except Exception:
             time.sleep(0.1)
 
-# ================= BOTTOM RAINBOW BANNER =================
+# ================= UI OVERLAYS & WINDOWS =================
 class RainbowHeaderOverlay(QWidget):
     def __init__(self):
         super().__init__()
@@ -477,14 +463,10 @@ class RainbowHeaderOverlay(QWidget):
             hue = (self.hue_offset + stop_pos) % 1.0
             grad.setColorAt(stop_pos, QColor.fromHsvF(hue, 0.9, 1.0))
 
-        rect = self.rect()
-        text = "ZeroX Mods"
-
         p.setPen(QPen(QBrush(grad), 1))
-        p.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
+        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "ZeroX Mods")
         p.end()
 
-# ================= STATUS HUD =================
 class OverlayHUD(QWidget):
     def __init__(self):
         super().__init__()
@@ -569,7 +551,6 @@ class OverlayHUD(QWidget):
             self.items[feature].setVisible(enabled)
             self.adjustSize()
 
-# ================= PARTICLE BACKGROUND =================
 class Particle:
     def __init__(self, w, h):
         self.reset(w, h, random_y=True)
@@ -591,10 +572,10 @@ class Particle:
 class CustomParticleFrame(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.particles = [Particle(340, 240) for _ in range(30)]
+        self.particles = [Particle(340, 240) for _ in range(30)] # Giảm số hạt để mượt hơn
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.animate_particles)
-        self.timer.start(33)
+        self.timer.start(33) # Đưa về ~30 FPS để chống giật khi kéo cửa sổ
 
     def animate_particles(self):
         w, h = self.width(), self.height()
@@ -615,37 +596,31 @@ class CustomParticleFrame(QFrame):
             p.drawEllipse(QPointF(pt.x, pt.y), pt.size / 2.0, pt.size / 2.0)
         p.end()
 
-# ================= CUSTOM PROGRESS BAR (MẪU MỚI 30MB) =================
 class CustomProgressBar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(8)
+        self.setFixedHeight(5)
         self._progress = 0.0
+        self._color = QColor("#00ff66")
 
-    def set_progress(self, val: float):
+    def set_progress(self, val: float, color: QColor):
         self._progress = max(0.0, min(100.0, val))
+        self._color = color
         self.update()
 
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
         p.setBrush(QBrush(QColor("#161a22")))
         p.setPen(Qt.PenStyle.NoPen)
-        p.drawRoundedRect(0, 0, self.width(), self.height(), 4, 4)
+        p.drawRoundedRect(0, 0, self.width(), self.height(), 2, 2)
 
         if self._progress > 0:
             fill_w = int(self.width() * (self._progress / 100.0))
-            
-            grad = QLinearGradient(0, 0, fill_w, 0)
-            grad.setColorAt(0.0, QColor("#00aa44"))
-            grad.setColorAt(1.0, QColor("#00ff66"))
-            
-            p.setBrush(QBrush(grad))
-            p.drawRoundedRect(0, 0, max(fill_w, 6), self.height(), 4, 4)
+            p.setBrush(QBrush(self._color))
+            p.drawRoundedRect(0, 0, max(fill_w, 4), self.height(), 2, 2)
         p.end()
 
-# ================= CHẤM TRÒN XANH PHÁT SÁNG =================
 class GlowingCircleDot(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -655,7 +630,6 @@ class GlowingCircleDot(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(Qt.PenStyle.NoPen)
-
         cx, cy = self.width() / 2.0, self.height() / 2.0
 
         glow = QRadialGradient(cx, cy, 6.5)
@@ -669,7 +643,6 @@ class GlowingCircleDot(QWidget):
         p.drawEllipse(QPointF(cx, cy), 2.8, 2.8)
         p.end()
 
-# ================= TOP TITLE BAR =================
 class TopBar(QWidget):
     def __init__(self, title_text, on_close=None, on_minimize=None, parent=None):
         super().__init__(parent)
@@ -682,7 +655,7 @@ class TopBar(QWidget):
         layout.addWidget(self.dot)
 
         self.title_lbl = QLabel(title_text)
-        self.title_lbl.setStyleSheet("color: #d1d5db; font-size: 10px; font-weight: 700; letter-spacing: 0.3px; font-family: 'Consolas', 'Segoe UI', Arial;")
+        self.title_lbl.setStyleSheet("color: #d1d5db; font-size: 10px; font-weight: 700; font-family: 'Consolas', 'Segoe UI', Arial;")
         layout.addWidget(self.title_lbl)
         layout.addStretch()
 
@@ -702,7 +675,6 @@ class TopBar(QWidget):
             self.close_btn.clicked.connect(on_close)
             layout.addWidget(self.close_btn)
 
-# ================= GIAO DIỆN LOGIN KEY =================
 class LoginWidget(QWidget):
     def __init__(self, on_login_success, on_close_callback, on_minimize_callback, parent=None):
         super().__init__(parent)
@@ -828,7 +800,6 @@ class LoginWidget(QWidget):
             self.status_msg.setStyleSheet("color: #ef4444; font-size: 9px; font-weight: bold;")
             self.status_msg.setText(msg)
 
-# ================= STAGE 1: ZEROX CHEAT LOADER (30MB) =================
 class DownloadWidget(QWidget):
     def __init__(self, on_inject_callback, on_close_callback, parent=None):
         super().__init__(parent)
@@ -838,25 +809,25 @@ class DownloadWidget(QWidget):
         layout.setContentsMargins(10, 8, 10, 14)
         layout.setSpacing(0)
 
-        layout.addWidget(TopBar("ZEROX CHEAT LOADER", on_close_callback))
-        layout.addSpacing(18)
+        layout.addWidget(TopBar("NETCHEAT LOADER", on_close_callback))
+        layout.addSpacing(22)
 
         self.status_lbl = QLabel("Downloading...")
         self.status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status_lbl.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: 700; font-family: 'Segoe UI', Arial;")
         layout.addWidget(self.status_lbl)
-        layout.addSpacing(14)
+        layout.addSpacing(18)
 
         self.pbar = CustomProgressBar()
         layout.addWidget(self.pbar)
-        layout.addSpacing(8)
+        layout.addSpacing(6)
 
         info_layout = QHBoxLayout()
         info_layout.setContentsMargins(2, 0, 2, 0)
-        self.left_lbl = QLabel("3.5 MB/s")
-        self.left_lbl.setStyleSheet("color: #00ff66; font-size: 11px; font-weight: 700; font-family: 'Consolas', Arial;")
-        self.right_lbl = QLabel("0% 0.0/30.0 MB")
-        self.right_lbl.setStyleSheet("color: #00ff66; font-size: 11px; font-weight: 700; font-family: 'Consolas', Arial;")
+        self.left_lbl = QLabel("--")
+        self.left_lbl.setStyleSheet("color: #00ff66; font-size: 11px; font-weight: 600; font-family: 'Segoe UI', Arial;")
+        self.right_lbl = QLabel("0% --")
+        self.right_lbl.setStyleSheet("color: #9ca3af; font-size: 11px; font-weight: 500; font-family: 'Segoe UI', Arial;")
 
         info_layout.addWidget(self.left_lbl)
         info_layout.addStretch()
@@ -886,38 +857,37 @@ class DownloadWidget(QWidget):
         self.action_btn.clicked.connect(self.handle_btn_click)
         layout.addWidget(self.action_btn)
 
-        self.current_progress = 0.0
+        self.current_progress = 0
         self.is_completed = False
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.tick_download)
 
     def start_download(self):
-        self.current_progress = 0.0
+        self.current_progress = 0
         self.is_completed = False
-        self.pbar.set_progress(0.0)
+        self.pbar.set_progress(0, QColor("#00ff66"))
         self.status_lbl.setText("Downloading...")
         self.status_lbl.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: 700; font-family: 'Segoe UI', Arial;")
-        self.left_lbl.setText("3.5 MB/s")
-        self.right_lbl.setText("0% 0.0/30.0 MB")
+        self.left_lbl.setText("--")
+        self.right_lbl.setText("0% 0.0/14.8 MB")
         self.action_btn.setText("CLOSE")
-        self.timer.start(30)
+        self.timer.start(25)
 
     def tick_download(self):
-        if self.current_progress < 100.0:
-            self.current_progress += 2.5
-            if self.current_progress > 100.0:
-                self.current_progress = 100.0
-            
-            self.pbar.set_progress(self.current_progress)
-            mb_done = (self.current_progress / 100.0) * 30.0
-            self.right_lbl.setText(f"{int(self.current_progress)}% {mb_done:.1f}/30.0 MB")
+        if self.current_progress < 100:
+            self.current_progress += 1
+            self.pbar.set_progress(self.current_progress, QColor("#00ff66"))
+            mb_done = (self.current_progress / 100.0) * 14.8
+            self.right_lbl.setText(f"{self.current_progress}% {mb_done:.1f}/14.8 MB")
+            if self.current_progress > 10:
+                self.left_lbl.setText("--")
         else:
             self.timer.stop()
             self.is_completed = True
             self.status_lbl.setText("Ready to Inject")
             self.status_lbl.setStyleSheet("color: #00ff66; font-size: 13px; font-weight: 800; font-family: 'Segoe UI', Arial;")
-            self.left_lbl.setText("30.0 MB")
-            self.right_lbl.setText("100% 30.0/30.0 MB")
+            self.left_lbl.setText("Verified")
+            self.right_lbl.setText("100% 14.8/14.8 MB")
             
             self.action_btn.setText("INJECT")
             self.action_btn.setStyleSheet("""
@@ -930,7 +900,6 @@ class DownloadWidget(QWidget):
                     font-weight: 900;
                     letter-spacing: 2.5px;
                     font-family: 'Consolas', 'Segoe UI', Arial;
-                    padding-top: 1px;
                 }
                 QPushButton:hover {
                     background-color: #00a346;
@@ -945,121 +914,189 @@ class DownloadWidget(QWidget):
         else:
             cleanup_and_exit()
 
-# ================= STAGE 2: GUI 1.0 (INJECT ADB GITHUB) =================
-class GuiWidget(QWidget):
+class InitializingWidget(QWidget):
+    def __init__(self, on_finish_callback, parent=None):
+        super().__init__(parent)
+        self.on_finish = on_finish_callback
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 8, 10, 14)
+        layout.setSpacing(0)
+
+        layout.addWidget(TopBar("LOADING"))
+        layout.addSpacing(32)
+
+        self.status_lbl = QLabel("Initializing System...")
+        self.status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_lbl.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: 700; font-family: 'Segoe UI', Arial;")
+        layout.addWidget(self.status_lbl)
+        layout.addSpacing(22)
+
+        self.pbar = CustomProgressBar()
+        layout.addWidget(self.pbar)
+        layout.addSpacing(8)
+
+        self.pct_lbl = QLabel("0%")
+        self.pct_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.pct_lbl.setStyleSheet("color: #00e676; font-size: 12px; font-weight: 700; font-family: 'Segoe UI', Arial;")
+        layout.addWidget(self.pct_lbl)
+        layout.addStretch()
+
+        self.current_progress = 0
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.tick_init)
+
+    def start(self):
+        self.current_progress = 0
+        self.timer.start(24)
+
+    def tick_init(self):
+        self.current_progress += 1
+        if self.current_progress < 50:
+            color = QColor("#00e676")
+            css = "#00e676"
+        elif self.current_progress < 80:
+            color = QColor("#00a2ff")
+            css = "#00a2ff"
+        else:
+            color = QColor("#9d4edd")
+            css = "#9d4edd"
+
+        self.pbar.set_progress(self.current_progress, color)
+        self.pct_lbl.setText(f"{self.current_progress}%")
+        self.pct_lbl.setStyleSheet(f"color: {css}; font-size: 12px; font-weight: 700; font-family: 'Segoe UI', Arial;")
+
+        if self.current_progress >= 100:
+            self.timer.stop()
+            QTimer.singleShot(250, self.on_finish)
+
+class KeybindsWidget(QWidget):
     def __init__(self, on_close_callback, parent=None):
         super().__init__(parent)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 8, 14, 14)
-        layout.setSpacing(10)
+        layout.setContentsMargins(14, 8, 14, 12)
+        layout.setSpacing(6)
 
-        layout.addWidget(TopBar("GUI 1.0", on_close_callback))
-        layout.addSpacing(10)
+        self.top_bar = TopBar("KEYBINDS", on_close_callback)
+        layout.addWidget(self.top_bar)
+        layout.addSpacing(6)
 
-        status_lbl = QLabel("Enable Inject Connect")
-        status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        status_lbl.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: 700; font-family: 'Segoe UI', Arial;")
-        layout.addWidget(status_lbl)
-        layout.addSpacing(10)
+        self.btn_tele = self.create_key_row(layout, "TELEKILL", app_config.tele_hotkey, 'tele_hotkey')
+        self.btn_freeze = self.create_key_row(layout, "FREEZE", app_config.freeze_hotkey, 'freeze_hotkey')
+        self.btn_ghost = self.create_key_row(layout, "GHOST", app_config.ghost_hotkey, 'ghost_hotkey')
 
-        self.inject_adb_btn = QPushButton("INJECT ADB")
-        self.inject_adb_btn.setFixedHeight(40)
-        self.inject_adb_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.inject_adb_btn.setStyleSheet("""
+        layout.addSpacing(4)
+        hint_lbl = QLabel("Click button then press a key to bind")
+        hint_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint_lbl.setStyleSheet("color: #71717a; font-size: 10px; font-weight: 500; font-family: 'Segoe UI', Arial;")
+        layout.addWidget(hint_lbl)
+        layout.addSpacing(4)
+
+        self.sound_btn = QPushButton("Sound: ON" if app_config.beep_enabled else "Sound: OFF")
+        self.sound_btn.setFixedHeight(30)
+        self.sound_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.sound_btn.setStyleSheet("""
             QPushButton {
-                background-color: #181c24;
-                color: #ffffff;
-                border: 1px solid #2a3142;
-                border-radius: 8px;
-                font-size: 12px;
-                font-weight: 800;
-                letter-spacing: 1.5px;
-                font-family: 'Consolas', sans-serif;
+                background-color: #0e1117;
+                color: #e4e4e7;
+                border: 1px solid #27272a;
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: 700;
+                font-family: 'Segoe UI', Arial;
             }
             QPushButton:hover {
-                background-color: #212836;
-                border-color: #00ff66;
-                color: #00ff66;
+                background-color: #141821;
+                border-color: #3f3f46;
+                color: #ffffff;
             }
         """)
-        self.inject_adb_btn.clicked.connect(self.load_script_from_github)
-        layout.addWidget(self.inject_adb_btn)
-        layout.addStretch()
+        self.sound_btn.clicked.connect(self.toggle_sound)
+        layout.addWidget(self.sound_btn)
 
-    def load_script_from_github(self):
-        self.inject_adb_btn.setText("DOWNLOADING...")
-        self.inject_adb_btn.setEnabled(False)
-        QApplication.processEvents()
+        self.countdown_timer = QTimer(self)
+        self.countdown_timer.timeout.connect(self.update_key_expiry_display)
+        self.countdown_timer.start(1000)
+        self.update_key_expiry_display()
 
-        def fetch_and_run():
-            try:
-                res = requests.get(GITHUB_SCRIPT_URL, timeout=10)
-                if res.status_code == 200:
-                    script_code = res.text
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".py", mode="w", encoding="utf-8") as f:
-                        f.write(script_code)
-                        temp_path = f.name
-                    
-                    subprocess.Popen([sys.executable, temp_path])
-                    time.sleep(1)
+    def update_key_expiry_display(self):
+        exp_at = net_state.key_expires_at
+        curr_key = net_state.active_key or load_saved_key() or "KEY"
+
+        key_badge = f'<span style="color:#60a5fa; font-weight:700; font-size:9.5px;">[{curr_key}]</span>'
+
+        if exp_at == -1:
+            time_badge = '<span style="color:#00ff66; font-size:9.5px;">[Vĩnh viễn]</span>'
+        elif exp_at <= 0:
+            time_badge = ''
+        else:
+            rem = exp_at - time.time()
+            if rem <= 0:
+                time_badge = '<span style="color:#ef4444; font-size:9.5px;">[Hết hạn]</span>'
+            else:
+                days = int(rem // 86400)
+                hrs = int((rem % 86400) // 3600)
+                mins = int((rem % 3600) // 60)
+                secs = int(rem % 60)
+
+                if days > 0:
+                    time_str = f"{days}d {hrs:02d}h {mins:02d}m {secs:02d}s"
                 else:
-                    debug_log("Failed to fetch script from GitHub: status code " + str(res.status_code))
-            except Exception as e:
-                debug_log(f"GitHub script load error: {e}")
-            finally:
-                self.inject_adb_btn.setText("INJECT ADB")
-                self.inject_adb_btn.setEnabled(True)
+                    time_str = f"{hrs:02d}h {mins:02d}m {secs:02d}s"
 
-        threading.Thread(target=fetch_and_run, daemon=True).start()
+                time_badge = f'<span style="color:#00ff66; font-weight:800; font-size:9.5px;">[{time_str}]</span>'
 
-# ================= PARTICLE BACKGROUND =================
-class Particle:
-    def __init__(self, w, h):
-        self.reset(w, h, random_y=True)
+        self.top_bar.title_lbl.setText(f"KEYBINDS {key_badge} {time_badge}")
 
-    def reset(self, w, h, random_y=False):
-        self.x = random.uniform(2, max(w - 4, 10))
-        self.y = random.uniform(2, h - 4) if random_y else random.uniform(-10, 0)
-        self.speed = random.uniform(0.3, 0.9)
-        self.size = random.uniform(1.0, 2.2)
-        self.alpha = random.randint(120, 230)
-        self.drift = random.uniform(-0.1, 0.1)
+    def create_key_row(self, parent_layout, label_text, config_obj, config_key):
+        row = QHBoxLayout()
+        row.setContentsMargins(4, 2, 4, 2)
 
-    def update(self, w, h):
-        self.y += self.speed
-        self.x += self.drift
-        if self.y > h - 4 or self.x < 2 or self.x > w - 2:
-            self.reset(w, h)
+        lbl = QLabel(label_text)
+        lbl.setStyleSheet("color: #f4f4f5; font-size: 12px; font-weight: 700; font-family: 'Segoe UI', Arial; letter-spacing: 1px;")
+        row.addWidget(lbl)
+        row.addStretch()
 
-class CustomParticleFrame(QFrame):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.particles = [Particle(340, 240) for _ in range(30)]
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.animate_particles)
-        self.timer.start(33)
+        btn = QPushButton(config_obj.key.upper())
+        btn.setFixedSize(62, 28)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setStyleSheet("""
+            QPushButton {
+                background-color: #12151c;
+                color: #ffffff;
+                border: 1px solid #222733;
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: 700;
+                font-family: 'Segoe UI', Arial;
+            }
+            QPushButton:hover {
+                background-color: #1a1f2c;
+                border-color: #3b4252;
+            }
+        """)
+        btn.clicked.connect(lambda: self.start_rebinding(btn, config_obj, config_key))
+        row.addWidget(btn)
 
-    def animate_particles(self):
-        w, h = self.width(), self.height()
-        for p in self.particles:
-            p.update(w, h)
-        self.update()
+        parent_layout.addLayout(row)
+        return btn
 
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setBrush(QBrush(QColor("#0b0d11")))
-        p.setPen(QPen(QColor("#1f242d"), 1))
-        p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 12, 12)
+    def start_rebinding(self, btn, config_obj, config_key):
+        btn.setText("...")
+        def on_key(event):
+            k = event.name.lower() if len(event.name) > 1 else event.name
+            config_obj.key = k
+            btn.setText(k.upper())
+            keyboard.unhook(hook)
+            save_config()
+        hook = keyboard.on_release(on_key)
 
-        p.setPen(Qt.PenStyle.NoPen)
-        for pt in self.particles:
-            p.setBrush(QBrush(QColor(255, 255, 255, pt.alpha)))
-            p.drawEllipse(QPointF(pt.x, pt.y), pt.size / 2.0, pt.size / 2.0)
-        p.end()
+    def toggle_sound(self):
+        app_config.beep_enabled = not app_config.beep_enabled
+        self.sound_btn.setText("Sound: ON" if app_config.beep_enabled else "Sound: OFF")
+        save_config()
 
-# ================= MAIN CONTAINER WINDOW =================
 class MainContainerWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -1079,12 +1116,15 @@ class MainContainerWindow(QWidget):
 
         self.login_view = LoginWidget(self.on_login_success, cleanup_and_exit, self.showMinimized)
         self.download_view = DownloadWidget(self.on_inject_clicked, cleanup_and_exit)
-        self.gui_view = GuiWidget(cleanup_and_exit)
+        self.init_view = InitializingWidget(self.on_init_finished)
+        self.keybinds_view = KeybindsWidget(cleanup_and_exit)
 
-        self.stack.addWidget(self.login_view)      # Index 0: Login
-        self.stack.addWidget(self.download_view)   # Index 1: ZEROX CHEAT LOADER (30MB)
-        self.stack.addWidget(self.gui_view)        # Index 2: GUI 1.0 (Inject ADB)
+        self.stack.addWidget(self.login_view)      
+        self.stack.addWidget(self.download_view)   
+        self.stack.addWidget(self.init_view)       
+        self.stack.addWidget(self.keybinds_view)   
 
+        signals.toggle_visibility.connect(self.toggle_visibility)
         self._drag = False
         self._pos = None
 
@@ -1094,8 +1134,21 @@ class MainContainerWindow(QWidget):
         self.download_view.start_download()
 
     def on_inject_clicked(self):
-        net_state.is_injected = True
+        signals.start_tracking.emit()
         self.stack.setCurrentIndex(2)
+        self.init_view.start()
+
+    def on_init_finished(self):
+        net_state.is_injected = True
+        self.keybinds_view.update_key_expiry_display()
+        self.stack.setCurrentIndex(3)
+
+    def toggle_visibility(self):
+        if self.isVisible(): self.hide()
+        else:
+            self.show()
+            self.raise_()
+            self.activateWindow()
 
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
@@ -1112,9 +1165,12 @@ class MainContainerWindow(QWidget):
         self._drag = False
         e.accept()
 
-# ================= RUNTIME ENTRY =================
 def cleanup_and_exit():
     net_state.running = False
+    with net_state.lock:
+        net_state.tele_mode = False
+        net_state.freeze_mode = False
+        net_state.ghost_mode = False
     try: keyboard.unhook_all()
     except Exception: pass
     QApplication.quit()
@@ -1131,6 +1187,9 @@ if __name__ == '__main__':
 
     main_win = MainContainerWindow()
     main_win.show()
+
+    hud = OverlayHUD()
+    rainbow = RainbowHeaderOverlay()
 
     threading.Thread(target=master_divert_worker, daemon=True).start()
     threading.Thread(target=hotkey_loop, daemon=True).start()
