@@ -482,7 +482,7 @@ class TopBar(QWidget):
         self.layout.addStretch()
 
         self.right_container = QHBoxLayout()
-        self.right_container.setSpacing(6)
+        self.right_container.setSpacing(4)
         self.layout.addLayout(self.right_container)
 
         if on_minimize:
@@ -1063,7 +1063,7 @@ class KeybindsWidget(QWidget):
 
         self.top_bar = TopBar("KEYBINDS", on_close=on_close_callback)
 
-        # Nút chuyển đổi nhanh chế độ Fix Dame góc trên bên phải
+        # Nút chuyển đổi nhanh chế độ Fix Dame phong cách xám gọn gàng
         self.fix_mode_btn = QPushButton()
         self.fix_mode_btn.setFixedHeight(18)
         self.fix_mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1113,36 +1113,25 @@ class KeybindsWidget(QWidget):
         self.update_key_expiry_display()
 
     def update_fix_mode_btn(self):
-        if app_config.fix_dame_enabled:
-            self.fix_mode_btn.setText("FIX: ON")
-            self.fix_mode_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #003819;
-                    color: #00ff66;
-                    border: 1px solid #00ff66;
-                    border-radius: 4px;
-                    font-size: 9px;
-                    font-weight: 800;
-                    font-family: 'Consolas', monospace;
-                    padding: 0 5px;
-                }
-                QPushButton:hover { background-color: #005224; }
-            """)
-        else:
-            self.fix_mode_btn.setText("FIX: OFF")
-            self.fix_mode_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #2b1114;
-                    color: #ef4444;
-                    border: 1px solid #ef4444;
-                    border-radius: 4px;
-                    font-size: 9px;
-                    font-weight: 800;
-                    font-family: 'Consolas', monospace;
-                    padding: 0 5px;
-                }
-                QPushButton:hover { background-color: #3d171c; }
-            """)
+        text = "Fix: ON" if app_config.fix_dame_enabled else "Fix: OFF"
+        self.fix_mode_btn.setText(text)
+        self.fix_mode_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #0e1117;
+                color: #e4e4e7;
+                border: 1px solid #27272a;
+                border-radius: 4px;
+                font-size: 8.5px;
+                font-weight: 700;
+                font-family: 'Segoe UI', Arial;
+                padding: 0px 4px;
+            }
+            QPushButton:hover {
+                background-color: #141821;
+                border-color: #3f3f46;
+                color: #ffffff;
+            }
+        """)
 
     def toggle_fix_mode(self):
         app_config.fix_dame_enabled = not app_config.fix_dame_enabled
