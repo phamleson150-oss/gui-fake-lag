@@ -36,7 +36,7 @@ try:
         QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
         QPushButton, QFrame, QStackedWidget, QLineEdit
     )
-    from PyQt6.QtCore import Qt, pyqtSignal, QObject, QPointF, QTimer
+    from PyQt6.QtCore import Qt, pyqtSignal, QObject, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup
     from PyQt6.QtGui import QColor, QPainter, QBrush, QPen, QFont, QLinearGradient, QRadialGradient
 except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "PyQt6"])
@@ -44,7 +44,7 @@ except ImportError:
         QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
         QPushButton, QFrame, QStackedWidget, QLineEdit
     )
-    from PyQt6.QtCore import Qt, pyqtSignal, QObject, QPointF, QTimer
+    from PyQt6.QtCore import Qt, pyqtSignal, QObject, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup
     from PyQt6.QtGui import QColor, QPainter, QBrush, QPen, QFont, QLinearGradient, QRadialGradient
 
 # ================= CẤU HÌNH HỆ THỐNG =================
@@ -306,11 +306,9 @@ def master_divert_worker():
                         block_out = net_state.tele_mode or net_state.ghost_mode
                         block_in = net_state.freeze_mode or net_state.ghost_mode
 
-                    # Khi tắt chặn Inbound: xả toàn bộ gói tin để mạng mượt lại ngay lập tức
                     if not block_in and inbound_queue:
                         flush_inbound(handle)
 
-                    # Khi tắt chặn Outbound: xả toàn bộ gói tin đi
                     if not block_out and outbound_legacy_queue:
                         flush_outbound(handle)
 
@@ -433,6 +431,55 @@ def hotkey_loop():
             time.sleep(0.1)
 
 # ================= UI WIDGETS & COMPONENTS =================
+class SlidingStackedWidget(QStackedWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._is_animating = False
+        self._anim_group = None
+
+    def slide_to_index(self, target_idx: int):
+        if self._is_animating or target_idx == self.currentIndex():
+            return
+        
+        self._is_animating = True
+        curr_idx = self.currentIndex()
+        direction = 1 if target_idx > curr_idx else -1
+
+        w = self.frameRect().width()
+        offset = QPoint(w * direction, 0)
+
+        next_w = self.widget(target_idx)
+        curr_w = self.widget(curr_idx)
+
+        next_w.setGeometry(self.rect())
+        next_w.move(offset)
+        next_w.show()
+        next_w.raise_()
+
+        anim_curr = QPropertyAnimation(curr_w, b"pos")
+        anim_curr.setDuration(220)
+        anim_curr.setStartValue(QPoint(0, 0))
+        anim_curr.setEndValue(QPoint(-w * direction, 0))
+        anim_curr.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        anim_next = QPropertyAnimation(next_w, b"pos")
+        anim_next.setDuration(220)
+        anim_next.setStartValue(offset)
+        anim_next.setEndValue(QPoint(0, 0))
+        anim_next.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        self._anim_group = QParallelAnimationGroup(self)
+        self._anim_group.addAnimation(anim_curr)
+        self._anim_group.addAnimation(anim_next)
+
+        def on_finished():
+            self.setCurrentIndex(target_idx)
+            curr_w.move(0, 0)
+            self._is_animating = False
+
+        self._anim_group.finished.connect(on_finished)
+        self._anim_group.start()
+
 class GlowingCircleDot(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1113,137 +1160,38 @@ class KeyExpiredWidget(QWidget):
 
         layout.addLayout(btn_box)
 
-class KeybindsWidget(QWidget):
-    def __init__(self, on_close_callback, parent=None):
+# ================= TAB CONTENT PAGES =================
+class MainTabPage(QWidget):
+    def __init__(self, parent_widget, parent=None):
         super().__init__(parent)
+        self.parent_widget = parent_widget
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 8, 14, 12)
-        layout.setSpacing(6)
-
-        self.top_bar = TopBar("KEYBINDS", on_close=on_close_callback)
-
-        self.fix_mode_btn = QPushButton()
-        self.fix_mode_btn.setFixedHeight(18)
-        self.fix_mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.update_fix_mode_btn()
-        self.fix_mode_btn.clicked.connect(self.toggle_fix_mode)
-        self.top_bar.add_right_widget(self.fix_mode_btn)
-
-        layout.addWidget(self.top_bar)
-        layout.addSpacing(6)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(5)
 
         self.btn_tele = self.create_key_row(layout, "TELEKILL", app_config.tele_hotkey, 'tele_hotkey')
         self.btn_freeze = self.create_key_row(layout, "FREEZE", app_config.freeze_hotkey, 'freeze_hotkey')
         self.btn_ghost = self.create_key_row(layout, "GHOST", app_config.ghost_hotkey, 'ghost_hotkey')
 
-        layout.addSpacing(4)
+        layout.addSpacing(2)
         hint_lbl = QLabel("Click button then press a key to bind")
         hint_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint_lbl.setStyleSheet("color: #71717a; font-size: 10px; font-weight: 500; font-family: 'Segoe UI', Arial;")
+        hint_lbl.setStyleSheet("color: #71717a; font-size: 9.5px; font-weight: 500; font-family: 'Segoe UI', Arial;")
         layout.addWidget(hint_lbl)
-        layout.addSpacing(4)
-
-        self.sound_btn = QPushButton("Sound: ON" if app_config.beep_enabled else "Sound: OFF")
-        self.sound_btn.setFixedHeight(30)
-        self.sound_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.sound_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #0e1117;
-                color: #e4e4e7;
-                border: 1px solid #27272a;
-                border-radius: 6px;
-                font-size: 11px;
-                font-weight: 700;
-                font-family: 'Segoe UI', Arial;
-            }
-            QPushButton:hover {
-                background-color: #141821;
-                border-color: #3f3f46;
-                color: #ffffff;
-            }
-        """)
-        self.sound_btn.clicked.connect(self.toggle_sound)
-        layout.addWidget(self.sound_btn)
-
-        self.countdown_timer = QTimer(self)
-        self.countdown_timer.timeout.connect(self.update_key_expiry_display)
-
-    def start_timer(self):
-        self.countdown_timer.start(1000)
-        self.update_key_expiry_display()
-
-    def stop_timer(self):
-        self.countdown_timer.stop()
-
-    def update_fix_mode_btn(self):
-        text = "Fix: ON" if app_config.fix_dame_enabled else "Fix: OFF"
-        self.fix_mode_btn.setText(text)
-        self.fix_mode_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #0e1117;
-                color: #e4e4e7;
-                border: 1px solid #27272a;
-                border-radius: 4px;
-                font-size: 8.5px;
-                font-weight: 700;
-                font-family: 'Segoe UI', Arial;
-                padding: 0px 4px;
-            }
-            QPushButton:hover {
-                background-color: #141821;
-                border-color: #3f3f46;
-                color: #ffffff;
-            }
-        """)
-
-    def toggle_fix_mode(self):
-        app_config.fix_dame_enabled = not app_config.fix_dame_enabled
-        save_config()
-        self.update_fix_mode_btn()
-
-    def update_key_expiry_display(self):
-        exp_at = net_state.key_expires_at
-        curr_key = net_state.active_key or load_saved_key() or "KEY"
-
-        key_badge = f'<span style="color:#60a5fa; font-weight:700; font-size:9.5px;">[{curr_key}]</span>'
-
-        if exp_at == -1:
-            time_badge = '<span style="color:#00ff66; font-size:9.5px;">[Vĩnh viễn]</span>'
-        elif exp_at <= 0:
-            time_badge = ''
-        else:
-            rem = exp_at - time.time()
-            if rem <= 0:
-                self.countdown_timer.stop()
-                signals.key_expired.emit()
-                return
-            else:
-                days = int(rem // 86400)
-                hrs = int((rem % 86400) // 3600)
-                mins = int((rem % 3600) // 60)
-                secs = int(rem % 60)
-
-                if days > 0:
-                    time_str = f"{days}d {hrs:02d}h {mins:02d}m {secs:02d}s"
-                else:
-                    time_str = f"{hrs:02d}h {mins:02d}m {secs:02d}s"
-
-                time_badge = f'<span style="color:#00ff66; font-weight:800; font-size:9.5px;">[{time_str}]</span>'
-
-        self.top_bar.title_lbl.setText(f"KEYBINDS {key_badge} {time_badge}")
+        layout.addStretch()
 
     def create_key_row(self, parent_layout, label_text, config_obj, config_key):
         row = QHBoxLayout()
         row.setContentsMargins(4, 2, 4, 2)
 
         lbl = QLabel(label_text)
-        lbl.setStyleSheet("color: #f4f4f5; font-size: 12px; font-weight: 700; font-family: 'Segoe UI', Arial; letter-spacing: 1px;")
+        lbl.setStyleSheet("color: #f4f4f5; font-size: 11.5px; font-weight: 700; font-family: 'Segoe UI', Arial; letter-spacing: 1px;")
         row.addWidget(lbl)
         row.addStretch()
 
         btn = QPushButton(config_obj.key.upper())
-        btn.setFixedSize(62, 28)
+        btn.setFixedSize(62, 26)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setStyleSheet("""
             QPushButton {
@@ -1276,10 +1224,195 @@ class KeybindsWidget(QWidget):
             save_config()
         hook = keyboard.on_release(on_key)
 
+class SettingTabPage(QWidget):
+    def __init__(self, parent_widget, parent=None):
+        super().__init__(parent)
+        self.parent_widget = parent_widget
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(6)
+
+        # Sound Button
+        self.sound_btn = QPushButton("Sound: ON" if app_config.beep_enabled else "Sound: OFF")
+        self.sound_btn.setFixedHeight(30)
+        self.sound_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.sound_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #0e1117;
+                color: #e4e4e7;
+                border: 1px solid #27272a;
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: 700;
+                font-family: 'Segoe UI', Arial;
+            }
+            QPushButton:hover {
+                background-color: #141821;
+                border-color: #3f3f46;
+                color: #ffffff;
+            }
+        """)
+        self.sound_btn.clicked.connect(self.toggle_sound)
+        layout.addWidget(self.sound_btn)
+
+        # Fix Dame Button
+        self.fix_dame_btn = QPushButton()
+        self.fix_dame_btn.setFixedHeight(30)
+        self.fix_dame_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.update_fix_btn_display()
+        self.fix_dame_btn.clicked.connect(self.toggle_fix_dame)
+        layout.addWidget(self.fix_dame_btn)
+
+        layout.addStretch()
+
+    def update_fix_btn_display(self):
+        text = "Fix Dame: ON" if app_config.fix_dame_enabled else "Fix Dame: OFF"
+        self.fix_dame_btn.setText(text)
+        self.fix_dame_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #0e1117;
+                color: #e4e4e7;
+                border: 1px solid #27272a;
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: 700;
+                font-family: 'Segoe UI', Arial;
+            }
+            QPushButton:hover {
+                background-color: #141821;
+                border-color: #3f3f46;
+                color: #ffffff;
+            }
+        """)
+
     def toggle_sound(self):
         app_config.beep_enabled = not app_config.beep_enabled
         self.sound_btn.setText("Sound: ON" if app_config.beep_enabled else "Sound: OFF")
         save_config()
+
+    def toggle_fix_dame(self):
+        app_config.fix_dame_enabled = not app_config.fix_dame_enabled
+        save_config()
+        self.update_fix_btn_display()
+
+class KeybindsWidget(QWidget):
+    def __init__(self, on_close_callback, parent=None):
+        super().__init__(parent)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 6, 12, 10)
+        layout.setSpacing(5)
+
+        self.top_bar = TopBar("KEYBINDS", on_close=on_close_callback)
+        layout.addWidget(self.top_bar)
+
+        # Tab Selector Bar
+        tab_bar_layout = QHBoxLayout()
+        tab_bar_layout.setSpacing(6)
+        tab_bar_layout.setContentsMargins(4, 2, 4, 2)
+
+        self.tab_main_btn = QPushButton("MAIN")
+        self.tab_main_btn.setFixedHeight(24)
+        self.tab_main_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        self.tab_setting_btn = QPushButton("SETTING")
+        self.tab_setting_btn.setFixedHeight(24)
+        self.tab_setting_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        self.tab_main_btn.clicked.connect(lambda: self.switch_tab(0))
+        self.tab_setting_btn.clicked.connect(lambda: self.switch_tab(1))
+
+        tab_bar_layout.addWidget(self.tab_main_btn)
+        tab_bar_layout.addWidget(self.tab_setting_btn)
+        layout.addLayout(tab_bar_layout)
+
+        # Sliding Stacked Tab Body
+        self.tab_stack = SlidingStackedWidget(self)
+        self.main_page = MainTabPage(self)
+        self.setting_page = SettingTabPage(self)
+
+        self.tab_stack.addWidget(self.main_page)
+        self.tab_stack.addWidget(self.setting_page)
+        layout.addWidget(self.tab_stack)
+
+        self.update_tab_buttons(0)
+
+        self.countdown_timer = QTimer(self)
+        self.countdown_timer.timeout.connect(self.update_key_expiry_display)
+
+    def switch_tab(self, index: int):
+        self.update_tab_buttons(index)
+        self.tab_stack.slide_to_index(index)
+
+    def update_tab_buttons(self, active_index: int):
+        style_active = """
+            QPushButton {
+                background-color: #1a202c;
+                color: #00ff66;
+                border: 1px solid #00ff66;
+                border-radius: 5px;
+                font-size: 10px;
+                font-weight: 800;
+                font-family: 'Consolas', 'Segoe UI', Arial;
+            }
+        """
+        style_inactive = """
+            QPushButton {
+                background-color: #0e1117;
+                color: #9ca3af;
+                border: 1px solid #27272a;
+                border-radius: 5px;
+                font-size: 10px;
+                font-weight: 700;
+                font-family: 'Consolas', 'Segoe UI', Arial;
+            }
+            QPushButton:hover {
+                background-color: #141821;
+                border-color: #3f3f46;
+                color: #ffffff;
+            }
+        """
+        self.tab_main_btn.setStyleSheet(style_active if active_index == 0 else style_inactive)
+        self.tab_setting_btn.setStyleSheet(style_active if active_index == 1 else style_inactive)
+
+    def start_timer(self):
+        self.countdown_timer.start(1000)
+        self.update_key_expiry_display()
+
+    def stop_timer(self):
+        self.countdown_timer.stop()
+
+    def update_key_expiry_display(self):
+        exp_at = net_state.key_expires_at
+        curr_key = net_state.active_key or load_saved_key() or "KEY"
+
+        key_badge = f'<span style="color:#60a5fa; font-weight:700; font-size:9.5px;">[{curr_key}]</span>'
+
+        if exp_at == -1:
+            time_badge = '<span style="color:#00ff66; font-size:9.5px;">[Vĩnh viễn]</span>'
+        elif exp_at <= 0:
+            time_badge = ''
+        else:
+            rem = exp_at - time.time()
+            if rem <= 0:
+                self.countdown_timer.stop()
+                signals.key_expired.emit()
+                return
+            else:
+                days = int(rem // 86400)
+                hrs = int((rem % 86400) // 3600)
+                mins = int((rem % 3600) // 60)
+                secs = int(rem % 60)
+
+                if days > 0:
+                    time_str = f"{days}d {hrs:02d}h {mins:02d}m {secs:02d}s"
+                else:
+                    time_str = f"{hrs:02d}h {mins:02d}m {secs:02d}s"
+
+                time_badge = f'<span style="color:#00ff66; font-weight:800; font-size:9.5px;">[{time_str}]</span>'
+
+        self.top_bar.title_lbl.setText(f"KEYBINDS {key_badge} {time_badge}")
 
 # ================= OVERLAYS & CONTAINER WINDOW =================
 class RainbowHeaderOverlay(QWidget):
@@ -1509,7 +1642,7 @@ class MainContainerWindow(QWidget):
     def on_init_finished(self):
         net_state.is_injected = True
         self.keybinds_view.update_key_expiry_display()
-        self.keybinds_view.update_fix_mode_btn()
+        self.keybinds_view.setting_page.update_fix_btn_display()
         self.keybinds_view.start_timer()
         self.stack.setCurrentIndex(5)
 
