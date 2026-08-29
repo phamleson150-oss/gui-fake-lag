@@ -120,6 +120,7 @@ EMULATOR_PROCESSES = [
 ]
 
 def get_process_name_by_hwnd(hwnd):
+    if not hwnd: return ""
     pid = wintypes.DWORD()
     ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
     h_proc = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid.value)
@@ -157,6 +158,13 @@ def find_emulator_window():
 
     ctypes.windll.user32.EnumWindows(WNDENUMPROC(enum_windows_callback), 0)
     return detected[0] if detected else (None, "None")
+
+def is_emulator_in_foreground():
+    fg_hwnd = ctypes.windll.user32.GetForegroundWindow()
+    if not fg_hwnd:
+        return False
+    pname = get_process_name_by_hwnd(fg_hwnd)
+    return any(proc in pname for proc in EMULATOR_PROCESSES)
 
 # ================= CONFIG & NETWORK ENGINE =================
 HOTKEY_FILE = 'zerox_hotkey.json'
@@ -329,11 +337,9 @@ def master_divert_worker():
                         block_in = net_state.freeze_mode or net_state.ghost_mode or net_state.aimlag_active
                         curr_tele = net_state.tele_mode
 
-                    # Khi tắt chặn Inbound: xả toàn bộ gói tin để mạng mượt lại ngay lập tức
                     if not block_in and inbound_queue:
                         flush_inbound_direct(handle)
 
-                    # Khi Telekill vừa tắt ở chế độ Không Fix Dame: Kích hoạt Thread xả burst packet
                     if prev_tele and not curr_tele and not app_config.fix_dame_enabled:
                         if outbound_legacy_queue:
                             pkts_to_burst = list(outbound_legacy_queue)
@@ -368,7 +374,7 @@ def master_divert_worker():
             debug_log(f"Divert error: {e}")
             time.sleep(0.1)
 
-# ================= MOUSE HOOK FOR AIMLAG =================
+# ================= MOUSE HOOK (NÚT BẮN TRONG GAME) =================
 def on_mouse_click(x, y, button, pressed):
     if not net_state.is_authenticated or not net_state.is_injected:
         return
@@ -376,16 +382,21 @@ def on_mouse_click(x, y, button, pressed):
         with net_state.lock:
             if not net_state.aimlag_armed:
                 return
-            if pressed and not net_state.mouse_held:
-                net_state.mouse_held = True
-                net_state.aimlag_active = True
-                audio.play_on()
-                signals.notify.emit('AimLag', True)
-            elif not pressed and net_state.mouse_held:
-                net_state.mouse_held = False
-                net_state.aimlag_active = False
-                audio.play_off()
-                signals.notify.emit('AimLag', False)
+
+            if pressed:
+                # Chỉ kích hoạt khi đang ở trong cửa sổ Game / Giả lập
+                if is_emulator_in_foreground() and not net_state.mouse_held:
+                    net_state.mouse_held = True
+                    net_state.aimlag_active = True
+                    audio.play_on()
+                    signals.notify.emit('AimLag', True)
+            else:
+                # Khi thả chuột ra -> Luôn tắt Freeze và đưa mạng về bình thường
+                if net_state.mouse_held:
+                    net_state.mouse_held = False
+                    net_state.aimlag_active = False
+                    audio.play_off()
+                    signals.notify.emit('AimLag', False)
 
 # ================= HOTKEY CONTROLLER =================
 def toggle_tele():
@@ -1246,9 +1257,9 @@ class MainTabPage(QWidget):
         self.btn_aimlag = self.create_key_row(layout, "AIM LAG (ARM)", app_config.aimlag_hotkey, 'aimlag_hotkey')
 
         layout.addSpacing(2)
-        hint_lbl = QLabel("Aim Lag: Bật phím ARM rồi nhấn giữ chuột trái để Freeze")
+        hint_lbl = QLabel("Aim Lag: Nhấn ARM, chỉ Freeze khi bấm chuột trái TRONG GAME")
         hint_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint_lbl.setStyleSheet("color: #71717a; font-size: 9px; font-weight: 500; font-family: 'Segoe UI', Arial;")
+        hint_lbl.setStyleSheet("color: #71717a; font-size: 8.5px; font-weight: 500; font-family: 'Segoe UI', Arial;")
         layout.addWidget(hint_lbl)
         layout.addStretch()
 
@@ -1774,6 +1785,7 @@ def cleanup_and_exit():
         net_state.freeze_mode = False
         net_state.ghost_mode = False
         net_state.aimlag_active = False
+        net_state.aimlag_armed = False
     try: keyboard.unhook_all()
     except Exception: pass
     QApplication.quit()
@@ -1797,7 +1809,7 @@ if __name__ == '__main__':
     threading.Thread(target=master_divert_worker, daemon=True).start()
     threading.Thread(target=hotkey_loop, daemon=True).start()
 
-    # Khởi chạy Hook Chuột Bắt Nút Bắn (AimLag)
+    # Hook Chuột: Bắt thao tác nhấn bắn chỉ khi đang ở trong Game
     mouse_listener = pynput_mouse.Listener(on_click=on_mouse_click)
     mouse_listener.daemon = True
     mouse_listener.start()
