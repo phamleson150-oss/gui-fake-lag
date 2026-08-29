@@ -174,6 +174,7 @@ FILTER_O          = "udp.DstPort >= 10010 and udp.DstPort <= 10020 and udp.Paylo
 FILTER_AIMLAG     = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
 
 MAX_PACKETS = 100
+MAX_AIMLAG_PACKETS = 35 # Tối ưu hóa: giới hạn gói Aim Lag để xả ngay lập tức không bị khựng mạng
 FREEZE_AUTO_DISABLE_SEC = 1.5
 
 HOTKEY_FILE = 'zerox_hotkey.json'
@@ -302,7 +303,6 @@ class NetState:
         self.aimlag_blocking = False
         self.mouse_held = False
 
-        # Cờ và Socket cho các luồng ShinMod
         self.R_I = False
         self.W_I = None
         self.R_G = False
@@ -337,7 +337,7 @@ def send_packets(lst, f):
     except Exception as e:
         debug_log(f"send_packets error: {e}")
 
-def send_burst_packets(packets, filter_str, burst_size=10, delay_per_pkt=0, delay_between_burst=0):
+def send_burst_packets(packets, filter_str, burst_size=15, delay_per_pkt=0, delay_between_burst=0):
     if not packets: return
     try:
         with pydivert.WinDivert(filter_str, layer=pydivert.Layer.NETWORK) as sender:
@@ -353,7 +353,7 @@ def send_burst_packets(packets, filter_str, burst_size=10, delay_per_pkt=0, dela
     except Exception as e:
         debug_log(f"send_burst_packets error: {e}")
 
-def divert_shinmod(filter_str, flag_ref, packet_list, cond_ref):
+def divert_shinmod(filter_str, flag_ref, packet_list, cond_ref, max_limit=MAX_PACKETS):
     h = None
     while net_state.running and net_state.is_authenticated and net_state.is_injected:
         if not flag_ref():
@@ -361,7 +361,7 @@ def divert_shinmod(filter_str, flag_ref, packet_list, cond_ref):
                 try: h.close()
                 except Exception: pass
             h = None
-            time.sleep(0.02)
+            time.sleep(0.01)
             continue
         if h is None:
             try:
@@ -369,19 +369,19 @@ def divert_shinmod(filter_str, flag_ref, packet_list, cond_ref):
                 h.open()
             except Exception as e:
                 debug_log(f"Divert open error on {filter_str}: {e}")
-                time.sleep(0.05)
+                time.sleep(0.02)
                 continue
         try:
             for pkt in h:
                 if not net_state.running or not flag_ref():
                     break
                 with net_state.lock:
-                    if cond_ref() and len(packet_list) >= MAX_PACKETS:
+                    if cond_ref() and len(packet_list) >= max_limit:
                         packet_list.pop(0)
                     packet_list.append(pydivert.Packet(pkt.raw, pkt.interface, pkt.direction))
         except Exception:
             pass
-        time.sleep(0.02)
+        time.sleep(0.01)
     if h:
         try: h.close()
         except Exception: pass
@@ -424,7 +424,6 @@ def divert_freeze_fix_dame_worker():
 
 # ================= TOGGLE CÁC CHỨC NĂNG =================
 
-# 1. FREEZE (Phân nhánh Fix Dame ON / OFF)
 def toggle_freeze():
     if not net_state.is_injected: return
     with net_state.lock:
@@ -437,7 +436,6 @@ def toggle_freeze():
                 except Exception: pass
                 net_state.W_I = None
             
-            # Nếu Fix Dame OFF -> Xả theo mẫu ShinMod
             if not app_config.fix_dame_enabled:
                 p = list(net_state.packet_freeze)
                 net_state.packet_freeze.clear()
@@ -448,7 +446,6 @@ def toggle_freeze():
             net_state.freeze_mode = True
             net_state.freeze_active_time = time.time()
             
-            # Nếu Fix Dame OFF -> Mở luồng thu nhận theo ShinMod
             if not app_config.fix_dame_enabled:
                 net_state.R_I = True
                 net_state.W_I = pydivert.WinDivert(FILTER_I, layer=pydivert.Layer.NETWORK)
@@ -464,7 +461,6 @@ def toggle_freeze():
     audio.play_freeze(active)
     signals.notify.emit('Freeze', active)
 
-# 2. GHOST (Luôn luôn dùng mẫu ShinMod)[cite: 1]
 def toggle_ghost():
     if not net_state.is_injected: return
     with net_state.lock:
@@ -496,7 +492,6 @@ def toggle_ghost():
     audio.play_ghost(active)
     signals.notify.emit('Ghost', active)
 
-# 3. TELEKILL (Luôn luôn dùng mẫu ShinMod với send_burst_packets)[cite: 1]
 def toggle_tele():
     if not net_state.is_injected: return
     with net_state.lock:
@@ -510,7 +505,7 @@ def toggle_tele():
             p = list(net_state.packet_tele)
             net_state.packet_tele.clear()
             if p:
-                threading.Thread(target=lambda: send_burst_packets(p, FILTER_O, 10, 0, 0), daemon=True).start()
+                threading.Thread(target=lambda: send_burst_packets(p, FILTER_O, 15, 0, 0), daemon=True).start()
             active = False
         else:
             net_state.tele_mode = True
@@ -528,7 +523,6 @@ def toggle_tele():
     audio.play_tele(active)
     signals.notify.emit('Telekill', active)
 
-# 4. AIM LAG (Luôn luôn dùng mẫu ShinMod qua Hook Chuột)[cite: 1]
 def toggle_aimlag_arm():
     if not net_state.is_injected: return
     with net_state.lock:
@@ -545,12 +539,12 @@ def toggle_aimlag_arm():
             p = list(net_state.packet_aimlag)
             net_state.packet_aimlag.clear()
             if p:
-                threading.Thread(target=send_packets, args=(p, FILTER_AIMLAG), daemon=True).start()
+                threading.Thread(target=lambda: send_burst_packets(p, FILTER_AIMLAG, 15, 0, 0), daemon=True).start()
 
     audio.play_aimlag(active)
     signals.notify.emit('AimLag', active)
 
-# ================= HOOK CHUỘT BẮT BẮN (AIM LAG SHINMOD) =================[cite: 1]
+# ================= HOOK CHUỘT AIM LAG ĐÃ TỐI ƯU SIÊU TỐC =================
 def on_mouse_click(x, y, button, pressed):
     if not net_state.is_authenticated or not net_state.is_injected:
         return
@@ -561,6 +555,7 @@ def on_mouse_click(x, y, button, pressed):
                 return
 
             if pressed:
+                # Bắt đầu bấm bắn: Chặn gói tin
                 if is_emulator_in_foreground() and not net_state.mouse_held:
                     net_state.mouse_held = True
                     net_state.aimlag_blocking = True
@@ -571,10 +566,11 @@ def on_mouse_click(x, y, button, pressed):
                     except Exception: pass
                     threading.Thread(
                         target=divert_shinmod,
-                        args=(FILTER_AIMLAG, lambda: net_state.R_A, net_state.packet_aimlag, lambda: net_state.aimlag_blocking),
+                        args=(FILTER_AIMLAG, lambda: net_state.R_A, net_state.packet_aimlag, lambda: net_state.aimlag_blocking, MAX_AIMLAG_PACKETS),
                         daemon=True,
                     ).start()
             else:
+                # Nhả nút bắn: Ngắt chặn lập tức và xả burst packet siêu tốc 0s delay
                 if net_state.mouse_held:
                     net_state.mouse_held = False
                     net_state.aimlag_blocking = False
@@ -586,7 +582,7 @@ def on_mouse_click(x, y, button, pressed):
                     p = list(net_state.packet_aimlag)
                     net_state.packet_aimlag.clear()
                     if p:
-                        threading.Thread(target=send_packets, args=(p, FILTER_AIMLAG), daemon=True).start()
+                        threading.Thread(target=lambda: send_burst_packets(p, FILTER_AIMLAG, 15, 0, 0), daemon=True).start()
 
 def stop_all_features():
     with net_state.lock:
@@ -625,10 +621,10 @@ def stop_all_features():
         net_state.packet_ghost.clear()
         net_state.packet_aimlag.clear()
 
-    if pt: threading.Thread(target=lambda: send_burst_packets(pt, FILTER_O, 10, 0, 0), daemon=True).start()
+    if pt: threading.Thread(target=lambda: send_burst_packets(pt, FILTER_O, 15, 0, 0), daemon=True).start()
     if pf and not app_config.fix_dame_enabled: threading.Thread(target=send_packets, args=(pf, FILTER_I), daemon=True).start()
     if pg: threading.Thread(target=send_packets, args=(pg, FILTER_F), daemon=True).start()
-    if pa: threading.Thread(target=send_packets, args=(pa, FILTER_AIMLAG), daemon=True).start()
+    if pa: threading.Thread(target=lambda: send_burst_packets(pa, FILTER_AIMLAG, 15, 0, 0), daemon=True).start()
 
     signals.notify.emit('Freeze', False)
     signals.notify.emit('Telekill', False)
@@ -648,7 +644,6 @@ def hotkey_loop():
                 is_freeze = net_state.freeze_mode
                 f_time = net_state.freeze_active_time
 
-            # Chỉ tự động ngắt Freeze khi ở chế độ Fix Dame ON
             if app_config.fix_dame_enabled:
                 if is_freeze and f_time > 0 and (curr_t - f_time >= FREEZE_AUTO_DISABLE_SEC):
                     toggle_freeze()
@@ -791,9 +786,6 @@ class TopBar(QWidget):
             close_btn.setStyleSheet("QPushButton { background: transparent; color: #6b7280; border: none; font-size: 11px; font-weight: bold; } QPushButton:hover { color: #ef4444; }")
             close_btn.clicked.connect(on_close)
             self.layout.addWidget(close_btn)
-
-    def add_right_widget(self, widget):
-        self.right_container.addWidget(widget)
 
 class Particle:
     def __init__(self, w, h):
