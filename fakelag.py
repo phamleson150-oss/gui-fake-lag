@@ -93,7 +93,7 @@ def verify_key_with_vps(key_str):
         return False, "Vui lòng nhập mã Key!", 0
     try:
         url = f"{VPS_VERIFY_URL}?key={urllib.parse.quote(key_str)}&hwid={CURRENT_HWID}"
-        response = requests.get(url, timeout=5)
+        response = requests.get(url, timeout=4)
         res_data = response.json()
         valid = res_data.get("valid", False) or res_data.get("success", False)
         msg = res_data.get("msg", "Lỗi xác thực")
@@ -166,7 +166,7 @@ def is_emulator_in_foreground():
     pname = get_process_name_by_hwnd(fg_hwnd)
     return any(proc in pname for proc in EMULATOR_PROCESSES)
 
-# ================= FILTERS CỦA SHINMOD & FIX DAME =================
+# ================= FILTERS & NETWORK ENGINE =================
 FILTER_FREEZE_FIX = "udp and ((udp.SrcPort >= 7000 and udp.SrcPort <= 18000) or (udp.DstPort >= 7000 and udp.DstPort <= 18000))"
 FILTER_I          = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
 FILTER_F          = "(udp.PayloadLength >= 53 and udp.PayloadLength <= 170) and (udp.DstPort >= 10011 and udp.DstPort <= 10020)"
@@ -174,7 +174,7 @@ FILTER_O          = "udp.DstPort >= 10010 and udp.DstPort <= 10020 and udp.Paylo
 FILTER_AIMLAG     = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
 
 MAX_PACKETS = 100
-MAX_AIMLAG_PACKETS = 35 # Tối ưu hóa: giới hạn gói Aim Lag để xả ngay lập tức không bị khựng mạng
+MAX_AIMLAG_PACKETS = 35
 FREEZE_AUTO_DISABLE_SEC = 1.5
 
 HOTKEY_FILE = 'zerox_hotkey.json'
@@ -327,7 +327,7 @@ class NetState:
 
 net_state = NetState()
 
-# ================= LUỒNG MẠNG CHUẨN SHINMOD =================
+# ================= LUỒNG MẠNG CHUẨN =================
 def send_packets(lst, f):
     if not lst: return
     try:
@@ -423,7 +423,6 @@ def divert_freeze_fix_dame_worker():
             time.sleep(0.05)
 
 # ================= TOGGLE CÁC CHỨC NĂNG =================
-
 def toggle_freeze():
     if not net_state.is_injected: return
     with net_state.lock:
@@ -544,7 +543,7 @@ def toggle_aimlag_arm():
     audio.play_aimlag(active)
     signals.notify.emit('AimLag', active)
 
-# ================= HOOK CHUỘT AIM LAG ĐÃ TỐI ƯU SIÊU TỐC =================
+# ================= HOOK CHUỘT AIM LAG ĐÃ TỐI ƯU =================
 def on_mouse_click(x, y, button, pressed):
     if not net_state.is_authenticated or not net_state.is_injected:
         return
@@ -555,7 +554,6 @@ def on_mouse_click(x, y, button, pressed):
                 return
 
             if pressed:
-                # Bắt đầu bấm bắn: Chặn gói tin
                 if is_emulator_in_foreground() and not net_state.mouse_held:
                     net_state.mouse_held = True
                     net_state.aimlag_blocking = True
@@ -570,7 +568,6 @@ def on_mouse_click(x, y, button, pressed):
                         daemon=True,
                     ).start()
             else:
-                # Nhả nút bắn: Ngắt chặn lập tức và xả burst packet siêu tốc 0s delay
                 if net_state.mouse_held:
                     net_state.mouse_held = False
                     net_state.aimlag_blocking = False
@@ -1880,10 +1877,28 @@ class MainContainerWindow(QWidget):
 
         self.stack.setCurrentIndex(0)
 
+        # Timer quét đồng bộ thời gian thực từ Server VPS (mỗi 3.5 giây)
+        self.sync_key_timer = QTimer(self)
+        self.sync_key_timer.timeout.connect(self.sync_key_with_server)
+
         signals.toggle_visibility.connect(self.toggle_visibility)
         signals.key_expired.connect(self.handle_key_expired)
         self._drag = False
         self._pos = None
+
+    def sync_key_with_server(self):
+        if not net_state.is_authenticated or not net_state.active_key:
+            return
+        
+        def _do_sync():
+            valid, msg, exp_at = verify_key_with_vps(net_state.active_key)
+            if valid:
+                if exp_at != net_state.key_expires_at:
+                    net_state.key_expires_at = exp_at
+            else:
+                signals.key_expired.emit()
+                
+        threading.Thread(target=_do_sync, daemon=True).start()
 
     def on_adb_clicked(self):
         self.stack.setCurrentIndex(1)
@@ -1894,6 +1909,7 @@ class MainContainerWindow(QWidget):
 
     def on_login_success(self):
         net_state.is_authenticated = True
+        self.sync_key_timer.start(3500) # Khởi chạy đồng bộ VPS định kỳ
         self.stack.setCurrentIndex(3)
         self.download_view.start_download()
 
@@ -1910,6 +1926,7 @@ class MainContainerWindow(QWidget):
         self.stack.setCurrentIndex(5)
 
     def handle_key_expired(self):
+        self.sync_key_timer.stop()
         stop_all_features()
         net_state.is_authenticated = False
         net_state.is_injected = False
@@ -1970,13 +1987,9 @@ if __name__ == '__main__':
     hud = OverlayHUD()
     rainbow = RainbowHeaderOverlay()
 
-    # Khởi chạy luồng xử lý gói tin cho Fix Dame Freeze
     threading.Thread(target=divert_freeze_fix_dame_worker, daemon=True).start()
-    
-    # Khởi chạy luồng lắng nghe Hotkey
     threading.Thread(target=hotkey_loop, daemon=True).start()
 
-    # Khởi chạy Hook Chuột cho Aim Lag
     mouse_listener = pynput_mouse.Listener(on_click=on_mouse_click)
     mouse_listener.daemon = True
     mouse_listener.start()
