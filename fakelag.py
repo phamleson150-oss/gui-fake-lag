@@ -97,7 +97,14 @@ def verify_key_with_vps(key_str):
         res_data = response.json()
         valid = res_data.get("valid", False) or res_data.get("success", False)
         msg = res_data.get("msg", "Lỗi xác thực")
-        expires_at = res_data.get("expires_at", -1)
+        
+        # Triệt tiêu sai lệch múi giờ giữa VPS và máy client
+        if "remaining_seconds" in res_data:
+            rem = float(res_data["remaining_seconds"])
+            expires_at = -1.0 if rem == -1 else (time.time() + rem)
+        else:
+            expires_at = float(res_data.get("expires_at", -1))
+            
         return valid, msg, expires_at
     except Exception:
         return False, "Lỗi kết nối VPS!", 0
@@ -1877,7 +1884,7 @@ class MainContainerWindow(QWidget):
 
         self.stack.setCurrentIndex(0)
 
-        # Timer quét đồng bộ thời gian thực từ Server VPS (mỗi 3.5 giây)
+        # Quét đồng bộ thời gian thực từ Server VPS mỗi 3.5 giây
         self.sync_key_timer = QTimer(self)
         self.sync_key_timer.timeout.connect(self.sync_key_with_server)
 
@@ -1893,8 +1900,7 @@ class MainContainerWindow(QWidget):
         def _do_sync():
             valid, msg, exp_at = verify_key_with_vps(net_state.active_key)
             if valid:
-                if exp_at != net_state.key_expires_at:
-                    net_state.key_expires_at = exp_at
+                net_state.key_expires_at = exp_at
             else:
                 signals.key_expired.emit()
                 
@@ -1909,7 +1915,7 @@ class MainContainerWindow(QWidget):
 
     def on_login_success(self):
         net_state.is_authenticated = True
-        self.sync_key_timer.start(3500) # Khởi chạy đồng bộ VPS định kỳ
+        self.sync_key_timer.start(3500)
         self.stack.setCurrentIndex(3)
         self.download_view.start_download()
 
