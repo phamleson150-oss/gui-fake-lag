@@ -318,7 +318,7 @@ class NetState:
 
 net_state = NetState()
 
-# ================= BỘ ĐIỀU PHỐI MẠNG TỰ GIẢI PHÓNG LUỒNG (ZERO LEAK ENGINE) =================
+# ================= BỘ ĐIỀU PHỐI MẠNG TỰ GIẢI PHÓNG LUỒNG =================
 class DivertSession:
     def __init__(self, filter_str, max_packets=MAX_PACKETS):
         self.filter_str = filter_str
@@ -497,7 +497,7 @@ def toggle_aimlag_arm():
     audio.play_aimlag(active)
     signals.notify.emit('AimLag', active)
 
-# ================= HOOK CHUỘT AIM LAG KHÔNG DELAY =================
+# ================= HOOK CHUỘT AIM LAG =================
 def on_mouse_click(x, y, button, pressed):
     if not net_state.is_authenticated or not net_state.is_injected:
         return
@@ -584,7 +584,7 @@ def hotkey_loop():
 
 # ================= UI WIDGETS & COMPONENTS =================
 class SlidingStackedWidget(QStackedWidget):
-    def __init__(parent=None, self=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
         self._is_animating = False
         self._anim_group = None
