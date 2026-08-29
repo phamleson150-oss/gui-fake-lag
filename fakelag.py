@@ -10,7 +10,6 @@ import random
 import subprocess
 import urllib.parse
 import webbrowser
-from collections import deque
 from dataclasses import dataclass
 
 try:
@@ -159,21 +158,34 @@ def find_emulator_window():
     ctypes.windll.user32.EnumWindows(WNDENUMPROC(enum_windows_callback), 0)
     return detected[0] if detected else (None, "None")
 
-def is_emulator_in_foreground():
+def is_click_in_emulator(x, y):
     fg_hwnd = ctypes.windll.user32.GetForegroundWindow()
-    if not fg_hwnd:
-        return False
-    pname = get_process_name_by_hwnd(fg_hwnd)
-    return any(proc in pname for proc in EMULATOR_PROCESSES)
+    if fg_hwnd:
+        pname = get_process_name_by_hwnd(fg_hwnd)
+        if any(proc in pname for proc in EMULATOR_PROCESSES):
+            return True
+    pt = POINT(int(x), int(y))
+    pt_hwnd = ctypes.windll.user32.WindowFromPoint(pt)
+    if pt_hwnd:
+        pname = get_process_name_by_hwnd(pt_hwnd)
+        if any(proc in pname for proc in EMULATOR_PROCESSES):
+            return True
+    return False
 
-# ================= CONFIG & NETWORK ENGINE =================
-HOTKEY_FILE = 'zerox_hotkey.json'
-MASTER_FILTER = "udp and ((udp.DstPort >= 7000 and udp.DstPort <= 18000) or (udp.SrcPort >= 7000 and udp.SrcPort <= 18000))"
-MAX_QUEUE_SIZE = 300
+# ================= FILTERS & MULTI-THREAD NETWORK ENGINE =================
+FILTER_FREEZE = "udp and ((udp.SrcPort >= 7000 and udp.SrcPort <= 18000) or (udp.DstPort >= 7000 and udp.DstPort <= 18000))"
+FILTER_F      = "(udp.PayloadLength >= 53 and udp.PayloadLength <= 170) and (udp.DstPort >= 10011 and udp.DstPort <= 10020)"
+FILTER_I      = "(udp.SrcPort >= 7000 and udp.SrcPort <= 18000) and ip and ip.Protocol == 17"
+FILTER_O      = "(udp.DstPort >= 7000 and udp.DstPort <= 18000) and ip and ip.Protocol == 17"
+FILTER_AIMLAG = "(udp.SrcPort >= 7000 and udp.SrcPort <= 18000) and ip and ip.Protocol == 17"
+
+MAX_PACKETS = 200
 
 FREEZE_AUTO_DISABLE_SEC = 1.5
 TELE_AUTO_DISABLE_SEC = 2.0
 GHOST_AUTO_DISABLE_SEC = 2.5
+
+HOTKEY_FILE = 'zerox_hotkey.json'
 
 def debug_log(msg):
     try:
@@ -273,108 +285,190 @@ class NetState:
         self.freeze_mode = False
         self.ghost_mode = False
         self.aimlag_armed = False
-        self.aimlag_active = False
+        self.aimlag_mode = False
         self.mouse_held = False
+        
+        self.R_I = False
+        self.R_G = False
+        self.R_T = False
+        self.R_A = False
+
+        self.packet_freeze = []
+        self.packet_ghost = []
+        self.packet_tele = []
+        self.packet_aimlag = []
+
         self.running = True
         self.is_authenticated = False
         self.is_injected = False
         self.active_key = ""
         self.key_expires_at = -1
-        self.total_passed = 0
+        
         self.freeze_active_time = 0.0
         self.tele_active_time = 0.0
         self.ghost_active_time = 0.0
 
 net_state = NetState()
 
-# ================= DIVERTER ENGINE =================
-def send_burst_packets(packets, filter_str=MASTER_FILTER, burst_size=10, delay_per_pkt=0.0005, delay_between_burst=0.002):
-    if not packets:
-        return
+# ================= THREADED PACKET PROCESSING =================
+def send_packets(lst, f):
+    if not lst: return
+    try:
+        with pydivert.WinDivert(f, layer=pydivert.Layer.NETWORK) as s:
+            for pkt in lst:
+                s.send(pydivert.Packet(pkt.raw, pkt.interface, pkt.direction))
+    except Exception as e:
+        debug_log(f"send_packets error: {e}")
+
+def send_burst_packets(packets, filter_str, burst_size=10, delay_per_pkt=0.0002, delay_between_burst=0.001):
+    if not packets: return
     try:
         with pydivert.WinDivert(filter_str, layer=pydivert.Layer.NETWORK) as sender:
             total = len(packets)
             for i in range(0, total, burst_size):
                 burst = packets[i:i+burst_size]
                 for pkt in burst:
-                    sender.send(pkt)
+                    sender.send(pydivert.Packet(pkt.raw, pkt.interface, pkt.direction))
                     if delay_per_pkt > 0:
                         time.sleep(delay_per_pkt)
                 if i + burst_size < total and delay_between_burst > 0:
                     time.sleep(delay_between_burst)
     except Exception as e:
-        debug_log(f"Burst send error: {e}")
+        debug_log(f"send_burst_packets error: {e}")
 
-def master_divert_worker():
-    inbound_queue = deque(maxlen=MAX_QUEUE_SIZE)
-    outbound_legacy_queue = deque(maxlen=MAX_QUEUE_SIZE)
-    prev_tele = False
-
-    def flush_inbound_direct(handle):
-        while inbound_queue:
-            try:
-                pkt = inbound_queue.popleft()
-                handle.send(pkt)
-                net_state.total_passed += 1
-            except Exception:
-                pass
-
-    while net_state.running:
-        if not net_state.is_authenticated or not net_state.is_injected:
-            time.sleep(0.05)
+def divert_worker(filter_str, flag_ref, packet_list, cond_ref):
+    h = None
+    while net_state.running and net_state.is_authenticated and net_state.is_injected:
+        if not flag_ref():
+            if h:
+                try: h.close()
+                except Exception: pass
+                h = None
+            time.sleep(0.015)
             continue
+        if h is None:
+            try:
+                h = pydivert.WinDivert(filter_str, layer=pydivert.Layer.NETWORK)
+                h.open()
+            except Exception as e:
+                debug_log(f"Divert open error on {filter_str}: {e}")
+                time.sleep(0.05)
+                continue
         try:
-            with pydivert.WinDivert(MASTER_FILTER, layer=pydivert.Layer.NETWORK) as handle:
-                while net_state.running and net_state.is_authenticated and net_state.is_injected:
-                    packet = handle.recv()
-                    if packet is None:
-                        continue
+            for pkt in h:
+                if not net_state.running or not flag_ref():
+                    break
+                with net_state.lock:
+                    if cond_ref() and len(packet_list) >= MAX_PACKETS:
+                        packet_list.pop(0)
+                    packet_list.append(pydivert.Packet(pkt.raw, pkt.interface, pkt.direction))
+        except Exception:
+            pass
+        time.sleep(0.015)
+    if h:
+        try: h.close()
+        except Exception: pass
 
-                    is_out = (packet.direction == pydivert.Direction.OUTBOUND)
+# ================= HOTKEY & FEATURE TOGGLES =================
+def toggle_freeze():
+    if not net_state.is_injected: return
+    with net_state.lock:
+        if net_state.freeze_mode:
+            net_state.freeze_mode = False
+            net_state.R_I = False
+            net_state.freeze_active_time = 0.0
+            p = list(net_state.packet_freeze)
+            net_state.packet_freeze.clear()
+            if p:
+                threading.Thread(target=send_packets, args=(p, FILTER_I), daemon=True).start()
+            active = False
+        else:
+            net_state.freeze_mode = True
+            net_state.R_I = True
+            net_state.freeze_active_time = time.time()
+            threading.Thread(
+                target=divert_worker,
+                args=(FILTER_I, lambda: net_state.R_I, net_state.packet_freeze, lambda: net_state.freeze_mode),
+                daemon=True
+            ).start()
+            active = True
 
-                    with net_state.lock:
-                        block_out = net_state.tele_mode or net_state.ghost_mode
-                        block_in = net_state.freeze_mode or net_state.ghost_mode or net_state.aimlag_active
-                        curr_tele = net_state.tele_mode
+    (audio.play_on if active else audio.play_off)()
+    signals.notify.emit('Freeze', active)
 
-                    if not block_in and inbound_queue:
-                        flush_inbound_direct(handle)
+def toggle_ghost():
+    if not net_state.is_injected: return
+    with net_state.lock:
+        if net_state.ghost_mode:
+            net_state.ghost_mode = False
+            net_state.R_G = False
+            net_state.ghost_active_time = 0.0
+            p = list(net_state.packet_ghost)
+            net_state.packet_ghost.clear()
+            if p:
+                threading.Thread(target=send_packets, args=(p, FILTER_F), daemon=True).start()
+            active = False
+        else:
+            net_state.ghost_mode = True
+            net_state.R_G = True
+            net_state.ghost_active_time = time.time()
+            threading.Thread(
+                target=divert_worker,
+                args=(FILTER_F, lambda: net_state.R_G, net_state.packet_ghost, lambda: net_state.ghost_mode),
+                daemon=True
+            ).start()
+            active = True
 
-                    if prev_tele and not curr_tele and not app_config.fix_dame_enabled:
-                        if outbound_legacy_queue:
-                            pkts_to_burst = list(outbound_legacy_queue)
-                            outbound_legacy_queue.clear()
-                            threading.Thread(target=send_burst_packets, args=(pkts_to_burst,), daemon=True).start()
-                    prev_tele = curr_tele
+    (audio.play_on if active else audio.play_off)()
+    signals.notify.emit('Ghost', active)
 
-                    if is_out:
-                        if app_config.fix_dame_enabled:
-                            if not block_out:
-                                handle.send(packet)
-                                net_state.total_passed += 1
-                        else:
-                            if block_out:
-                                outbound_legacy_queue.append(packet)
-                            else:
-                                while outbound_legacy_queue:
-                                    try:
-                                        handle.send(outbound_legacy_queue.popleft())
-                                        net_state.total_passed += 1
-                                    except Exception:
-                                        pass
-                                handle.send(packet)
-                                net_state.total_passed += 1
-                    else:
-                        if block_in:
-                            inbound_queue.append(packet)
-                        else:
-                            handle.send(packet)
-                            net_state.total_passed += 1
-        except Exception as e:
-            debug_log(f"Divert error: {e}")
-            time.sleep(0.1)
+def toggle_tele():
+    if not net_state.is_injected: return
+    with net_state.lock:
+        if net_state.tele_mode:
+            net_state.tele_mode = False
+            net_state.R_T = False
+            net_state.tele_active_time = 0.0
+            p = list(net_state.packet_tele)
+            net_state.packet_tele.clear()
+            if p:
+                if app_config.fix_dame_enabled:
+                    threading.Thread(target=send_packets, args=(p, FILTER_O), daemon=True).start()
+                else:
+                    threading.Thread(target=send_burst_packets, args=(p, FILTER_O, 10, 0, 0), daemon=True).start()
+            active = False
+        else:
+            net_state.tele_mode = True
+            net_state.R_T = True
+            net_state.tele_active_time = time.time()
+            threading.Thread(
+                target=divert_worker,
+                args=(FILTER_O, lambda: net_state.R_T, net_state.packet_tele, lambda: net_state.tele_mode),
+                daemon=True
+            ).start()
+            active = True
 
-# ================= MOUSE HOOK (NÚT BẮN TRONG GAME) =================
+    (audio.play_on if active else audio.play_off)()
+    signals.notify.emit('Telekill', active)
+
+def toggle_aimlag_arm():
+    if not net_state.is_injected: return
+    with net_state.lock:
+        net_state.aimlag_armed = not net_state.aimlag_armed
+        active = net_state.aimlag_armed
+        if not active:
+            net_state.aimlag_mode = False
+            net_state.R_A = False
+            net_state.mouse_held = False
+            p = list(net_state.packet_aimlag)
+            net_state.packet_aimlag.clear()
+            if p:
+                threading.Thread(target=send_packets, args=(p, FILTER_AIMLAG), daemon=True).start()
+
+    (audio.play_on if active else audio.play_off)()
+    signals.notify.emit('AimLag', active)
+
+# ================= MOUSE HOOK: BẮT NÚT BẮN TRONG GAME =================
 def on_mouse_click(x, y, button, pressed):
     if not net_state.is_authenticated or not net_state.is_injected:
         return
@@ -384,62 +478,59 @@ def on_mouse_click(x, y, button, pressed):
                 return
 
             if pressed:
-                # Chỉ kích hoạt khi đang ở trong cửa sổ Game / Giả lập
-                if is_emulator_in_foreground() and not net_state.mouse_held:
+                # Kiểm tra click chuột trong phạm vi cửa sổ Game/Giả lập
+                if is_click_in_emulator(x, y) and not net_state.mouse_held:
                     net_state.mouse_held = True
-                    net_state.aimlag_active = True
+                    net_state.aimlag_mode = True
+                    net_state.R_A = True
+                    net_state.packet_aimlag.clear()
+                    threading.Thread(
+                        target=divert_worker,
+                        args=(FILTER_AIMLAG, lambda: net_state.R_A, net_state.packet_aimlag, lambda: net_state.aimlag_mode),
+                        daemon=True
+                    ).start()
                     audio.play_on()
-                    signals.notify.emit('AimLag', True)
             else:
-                # Khi thả chuột ra -> Luôn tắt Freeze và đưa mạng về bình thường
+                # Nhả nút bắn -> Tắt Freeze và xả gói tin tức thì
                 if net_state.mouse_held:
                     net_state.mouse_held = False
-                    net_state.aimlag_active = False
+                    net_state.aimlag_mode = False
+                    net_state.R_A = False
+                    p = list(net_state.packet_aimlag)
+                    net_state.packet_aimlag.clear()
+                    if p:
+                        threading.Thread(target=send_packets, args=(p, FILTER_AIMLAG), daemon=True).start()
                     audio.play_off()
-                    signals.notify.emit('AimLag', False)
 
-# ================= HOTKEY CONTROLLER =================
-def toggle_tele():
-    if not net_state.is_injected: return
+def stop_all_features():
     with net_state.lock:
-        net_state.tele_mode = not net_state.tele_mode
-        net_state.tele_active_time = time.time() if net_state.tele_mode else 0.0
-        active = net_state.tele_mode
+        net_state.tele_mode = False
+        net_state.freeze_mode = False
+        net_state.ghost_mode = False
+        net_state.aimlag_mode = False
+        net_state.aimlag_armed = False
+        net_state.mouse_held = False
+        net_state.R_I = net_state.R_G = net_state.R_T = net_state.R_A = False
+        
+        pt = list(net_state.packet_tele)
+        pf = list(net_state.packet_freeze)
+        pg = list(net_state.packet_ghost)
+        pa = list(net_state.packet_aimlag)
+        
+        net_state.packet_tele.clear()
+        net_state.packet_freeze.clear()
+        net_state.packet_ghost.clear()
+        net_state.packet_aimlag.clear()
 
-    (audio.play_on if active else audio.play_off)()
-    signals.notify.emit('Telekill', active)
+    if pt: threading.Thread(target=send_packets, args=(pt, FILTER_O), daemon=True).start()
+    if pf: threading.Thread(target=send_packets, args=(pf, FILTER_I), daemon=True).start()
+    if pg: threading.Thread(target=send_packets, args=(pg, FILTER_F), daemon=True).start()
+    if pa: threading.Thread(target=send_packets, args=(pa, FILTER_AIMLAG), daemon=True).start()
 
-def toggle_freeze():
-    if not net_state.is_injected: return
-    with net_state.lock:
-        net_state.freeze_mode = not net_state.freeze_mode
-        net_state.freeze_active_time = time.time() if net_state.freeze_mode else 0.0
-        active = net_state.freeze_mode
-
-    (audio.play_on if active else audio.play_off)()
-    signals.notify.emit('Freeze', active)
-
-def toggle_ghost():
-    if not net_state.is_injected: return
-    with net_state.lock:
-        net_state.ghost_mode = not net_state.ghost_mode
-        net_state.ghost_active_time = time.time() if net_state.ghost_mode else 0.0
-        active = net_state.ghost_mode
-
-    (audio.play_on if active else audio.play_off)()
-    signals.notify.emit('Ghost', active)
-
-def toggle_aimlag_arm():
-    if not net_state.is_injected: return
-    with net_state.lock:
-        net_state.aimlag_armed = not net_state.aimlag_armed
-        if not net_state.aimlag_armed:
-            net_state.aimlag_active = False
-            net_state.mouse_held = False
-            signals.notify.emit('AimLag', False)
-        active = net_state.aimlag_armed
-
-    (audio.play_on if active else audio.play_off)()
+    signals.notify.emit('Freeze', False)
+    signals.notify.emit('Telekill', False)
+    signals.notify.emit('Ghost', False)
+    signals.notify.emit('AimLag', False)
 
 def hotkey_loop():
     tp = gp = fp = ap = hp = sp = False
@@ -460,25 +551,11 @@ def hotkey_loop():
 
             if app_config.fix_dame_enabled:
                 if is_freeze and f_time > 0 and (curr_t - f_time >= FREEZE_AUTO_DISABLE_SEC):
-                    with net_state.lock:
-                        net_state.freeze_mode = False
-                        net_state.freeze_active_time = 0.0
-                    audio.play_off()
-                    signals.notify.emit('Freeze', False)
-
+                    toggle_freeze()
                 if is_tele and t_time > 0 and (curr_t - t_time >= TELE_AUTO_DISABLE_SEC):
-                    with net_state.lock:
-                        net_state.tele_mode = False
-                        net_state.tele_active_time = 0.0
-                    audio.play_off()
-                    signals.notify.emit('Telekill', False)
-
+                    toggle_tele()
                 if is_ghost and g_time > 0 and (curr_t - g_time >= GHOST_AUTO_DISABLE_SEC):
-                    with net_state.lock:
-                        net_state.ghost_mode = False
-                        net_state.ghost_active_time = 0.0
-                    audio.play_off()
-                    signals.notify.emit('Ghost', False)
+                    toggle_ghost()
 
             cur_t = keyboard.is_pressed(app_config.tele_hotkey.key)
             if cur_t and not tp: toggle_tele()
@@ -1596,9 +1673,9 @@ class OverlayHUD(QWidget):
 
         self.items = {}
         for key, text, color in [("Freeze", "FREEZE ACTIVE", "#00f0ff"),
-                                 ("Telekill", "TELEPKILL ACTIVE", "#7000ff"),
+                                 ("Telekill", "TELEKILL ACTIVE", "#7000ff"),
                                  ("Ghost", "GHOST ACTIVE", "#00ff88"),
-                                 ("AimLag", "AIMLAG FREEZE", "#ff8800")]:
+                                 ("AimLag", "AIMLAG ACTIVE", "#ffaa00")]:
             lbl = QLabel(f" {text}")
             lbl.setFixedHeight(22)
             lbl.setStyleSheet(f"""
@@ -1726,25 +1803,10 @@ class MainContainerWindow(QWidget):
         self.stack.setCurrentIndex(5)
 
     def handle_key_expired(self):
-        with net_state.lock:
-            net_state.tele_mode = False
-            net_state.freeze_mode = False
-            net_state.ghost_mode = False
-            net_state.aimlag_armed = False
-            net_state.aimlag_active = False
-            net_state.mouse_held = False
-            net_state.tele_active_time = 0.0
-            net_state.freeze_active_time = 0.0
-            net_state.ghost_active_time = 0.0
-
+        stop_all_features()
         net_state.is_authenticated = False
         net_state.is_injected = False
-
         audio.play_off()
-        signals.notify.emit('Freeze', False)
-        signals.notify.emit('Telekill', False)
-        signals.notify.emit('Ghost', False)
-        signals.notify.emit('AimLag', False)
 
         if not self.isVisible():
             self.show()
@@ -1780,12 +1842,7 @@ class MainContainerWindow(QWidget):
 
 def cleanup_and_exit():
     net_state.running = False
-    with net_state.lock:
-        net_state.tele_mode = False
-        net_state.freeze_mode = False
-        net_state.ghost_mode = False
-        net_state.aimlag_active = False
-        net_state.aimlag_armed = False
+    stop_all_features()
     try: keyboard.unhook_all()
     except Exception: pass
     QApplication.quit()
@@ -1806,10 +1863,9 @@ if __name__ == '__main__':
     hud = OverlayHUD()
     rainbow = RainbowHeaderOverlay()
 
-    threading.Thread(target=master_divert_worker, daemon=True).start()
     threading.Thread(target=hotkey_loop, daemon=True).start()
 
-    # Hook Chuột: Bắt thao tác nhấn bắn chỉ khi đang ở trong Game
+    # Hook Chuột: Bắt sự kiện bắn chỉ khi click vào Game
     mouse_listener = pynput_mouse.Listener(on_click=on_mouse_click)
     mouse_listener.daemon = True
     mouse_listener.start()
