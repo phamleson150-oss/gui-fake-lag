@@ -10,6 +10,7 @@ import random
 import subprocess
 import urllib.parse
 import webbrowser
+from collections import deque
 from dataclasses import dataclass
 
 try:
@@ -23,6 +24,13 @@ try:
 except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "keyboard"])
     import keyboard
+
+try:
+    import pynput
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "pynput"])
+    import pynput
+from pynput import mouse as pynput_mouse
 
 try:
     import requests
@@ -151,7 +159,18 @@ def find_emulator_window():
     ctypes.windll.user32.EnumWindows(WNDENUMPROC(enum_windows_callback), 0)
     return detected[0] if detected else (None, "None")
 
-# ================= FILTERS CHUẨN SHINMOD =================
+def is_emulator_in_foreground():
+    fg_hwnd = ctypes.windll.user32.GetForegroundWindow()
+    if not fg_hwnd:
+        return False
+    pname = get_process_name_by_hwnd(fg_hwnd)
+    return any(proc in pname for proc in EMULATOR_PROCESSES)
+
+# ================= CÁC BỘ LỌC MẠNG =================
+# 1. Bộ lọc Fix Dame ON (Bắt bao quát dải cổng game)
+MASTER_FILTER = "udp and ((udp.DstPort >= 7000 and udp.DstPort <= 18000) or (udp.SrcPort >= 7000 and udp.SrcPort <= 18000))"
+
+# 2. Bộ lọc Fix Dame OFF (Bộ lọc độc lập ShinMod)
 FILTER_FREEZE = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
 FILTER_F      = "(udp.PayloadLength >= 53 and udp.PayloadLength <= 170) and (udp.DstPort >= 10011 and udp.DstPort <= 10020)"
 FILTER_I      = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
@@ -257,20 +276,16 @@ class AudioManager:
         threading.Thread(target=lambda: winsound.Beep(freq, dur), daemon=True).start()
 
     def play_tele(self, active):
-        if app_config.beep_tele:
-            self.beep(950 if active else 420, 75)
+        if app_config.beep_tele: self.beep(950 if active else 420, 75)
 
     def play_freeze(self, active):
-        if app_config.beep_freeze:
-            self.beep(900 if active else 400, 75)
+        if app_config.beep_freeze: self.beep(900 if active else 400, 75)
 
     def play_ghost(self, active):
-        if app_config.beep_ghost:
-            self.beep(1000 if active else 450, 75)
+        if app_config.beep_ghost: self.beep(1000 if active else 450, 75)
 
     def play_aimlag(self, active):
-        if app_config.beep_aimlag:
-            self.beep(850 if active else 380, 75)
+        if app_config.beep_aimlag: self.beep(850 if active else 380, 75)
 
 audio = AudioManager()
 
@@ -291,7 +306,11 @@ class NetState:
         self.freeze_mode = False
         self.ghost_mode = False
         self.aimlag_mode = False
+        self.aimlag_armed = False
+        self.aimlag_blocking = False
+        self.mouse_held = False
 
+        # Quản lý luồng ShinMod (Fix Dame OFF)
         self.R_I = False
         self.W_I = None
         self.R_G = False
@@ -319,10 +338,9 @@ class NetState:
 
 net_state = NetState()
 
-# ================= CÁC THREADS XỬ LÝ GÓI TIN CHUẨN SHINMOD =================
+# ================= LUỒNG MẠNG SHINMOD (FIX DAME OFF) =================
 def send_packets(lst, f):
-    if not lst:
-        return
+    if not lst: return
     try:
         with pydivert.WinDivert(f, layer=pydivert.Layer.NETWORK) as s:
             for pkt in lst:
@@ -331,8 +349,7 @@ def send_packets(lst, f):
         debug_log(f"send_packets error: {e}")
 
 def send_burst_packets(packets, filter_str, burst_size=10, delay_per_pkt=0, delay_between_burst=0):
-    if not packets:
-        return
+    if not packets: return
     try:
         with pydivert.WinDivert(filter_str, layer=pydivert.Layer.NETWORK) as sender:
             total = len(packets)
@@ -347,10 +364,10 @@ def send_burst_packets(packets, filter_str, burst_size=10, delay_per_pkt=0, dela
     except Exception as e:
         debug_log(f"send_burst_packets error: {e}")
 
-def divert(filter_str, flag_ref, packet_list, cond_ref):
+def divert_shinmod(filter_str, flag_ref, packet_list, cond_ref):
     h = None
     while net_state.running and net_state.is_authenticated and net_state.is_injected:
-        if not flag_ref():
+        if app_config.fix_dame_enabled or not flag_ref():
             if h:
                 try: h.close()
                 except Exception: pass
@@ -362,12 +379,12 @@ def divert(filter_str, flag_ref, packet_list, cond_ref):
                 h = pydivert.WinDivert(filter_str)
                 h.open()
             except Exception as e:
-                debug_log(f"Divert open error on {filter_str}: {e}")
+                debug_log(f"ShinMod divert open error on {filter_str}: {e}")
                 time.sleep(0.05)
                 continue
         try:
             for pkt in h:
-                if not net_state.running or not flag_ref():
+                if not net_state.running or not flag_ref() or app_config.fix_dame_enabled:
                     break
                 with net_state.lock:
                     if cond_ref() and len(packet_list) >= MAX_PACKETS:
@@ -380,7 +397,47 @@ def divert(filter_str, flag_ref, packet_list, cond_ref):
         try: h.close()
         except Exception: pass
 
-# ================= CHỨC NĂNG FAKE LAG BẬT TẮT QUA HOTKEY =================
+# ================= LUỒNG MẠNG TỰ XỬ LÝ (FIX DAME ON) =================
+def master_divert_worker_fix_dame():
+    inbound_queue = deque(maxlen=MAX_PACKETS)
+
+    while net_state.running:
+        if not net_state.is_authenticated or not net_state.is_injected or not app_config.fix_dame_enabled:
+            time.sleep(0.05)
+            continue
+        try:
+            with pydivert.WinDivert(MASTER_FILTER, layer=pydivert.Layer.NETWORK) as handle:
+                while net_state.running and net_state.is_authenticated and net_state.is_injected and app_config.fix_dame_enabled:
+                    packet = handle.recv()
+                    if packet is None:
+                        continue
+
+                    is_out = (packet.direction == pydivert.Direction.OUTBOUND)
+
+                    with net_state.lock:
+                        block_out = net_state.tele_mode or net_state.ghost_mode
+                        block_in = net_state.freeze_mode or net_state.ghost_mode or net_state.aimlag_blocking
+
+                    if is_out:
+                        # Fix dame ON: Outbound gửi trực tiếp nếu không bị chặn, chặn thì drop không dồn đệm
+                        if not block_out:
+                            handle.send(packet)
+                    else:
+                        # Fix dame ON: Inbound chặn thì giữ tạm thời, nhả ra thì xả tức thì
+                        if block_in:
+                            inbound_queue.append(packet)
+                        else:
+                            while inbound_queue:
+                                try:
+                                    handle.send(inbound_queue.popleft())
+                                except Exception:
+                                    pass
+                            handle.send(packet)
+        except Exception as e:
+            debug_log(f"Fix dame divert error: {e}")
+            time.sleep(0.05)
+
+# ================= TOGGLE CÁC CHỨC NĂNG (TỰ ĐỘNG THEO CHẾ ĐỘ) =================
 def toggle_freeze():
     if not net_state.is_injected: return
     with net_state.lock:
@@ -392,23 +449,25 @@ def toggle_freeze():
                 try: net_state.W_I.close()
                 except Exception: pass
                 net_state.W_I = None
-            p = list(net_state.packet_freeze)
-            net_state.packet_freeze.clear()
-            if p:
-                threading.Thread(target=send_packets, args=(p, FILTER_I), daemon=True).start()
+            if not app_config.fix_dame_enabled:
+                p = list(net_state.packet_freeze)
+                net_state.packet_freeze.clear()
+                if p:
+                    threading.Thread(target=send_packets, args=(p, FILTER_I), daemon=True).start()
             active = False
         else:
             net_state.freeze_mode = True
-            net_state.R_I = True
             net_state.freeze_active_time = time.time()
-            net_state.W_I = pydivert.WinDivert(FILTER_I, layer=pydivert.Layer.NETWORK)
-            try: net_state.W_I.open()
-            except Exception: pass
-            threading.Thread(
-                target=divert,
-                args=(FILTER_I, lambda: net_state.R_I, net_state.packet_freeze, lambda: net_state.freeze_mode),
-                daemon=True,
-            ).start()
+            if not app_config.fix_dame_enabled:
+                net_state.R_I = True
+                net_state.W_I = pydivert.WinDivert(FILTER_I, layer=pydivert.Layer.NETWORK)
+                try: net_state.W_I.open()
+                except Exception: pass
+                threading.Thread(
+                    target=divert_shinmod,
+                    args=(FILTER_I, lambda: net_state.R_I, net_state.packet_freeze, lambda: net_state.freeze_mode),
+                    daemon=True,
+                ).start()
             active = True
 
     audio.play_freeze(active)
@@ -425,23 +484,25 @@ def toggle_ghost():
                 try: net_state.W_G.close()
                 except Exception: pass
                 net_state.W_G = None
-            p = list(net_state.packet_ghost)
-            net_state.packet_ghost.clear()
-            if p:
-                threading.Thread(target=send_packets, args=(p, FILTER_F), daemon=True).start()
+            if not app_config.fix_dame_enabled:
+                p = list(net_state.packet_ghost)
+                net_state.packet_ghost.clear()
+                if p:
+                    threading.Thread(target=send_packets, args=(p, FILTER_F), daemon=True).start()
             active = False
         else:
             net_state.ghost_mode = True
-            net_state.R_G = True
             net_state.ghost_active_time = time.time()
-            net_state.W_G = pydivert.WinDivert(FILTER_F, layer=pydivert.Layer.NETWORK)
-            try: net_state.W_G.open()
-            except Exception: pass
-            threading.Thread(
-                target=divert,
-                args=(FILTER_F, lambda: net_state.R_G, net_state.packet_ghost, lambda: net_state.ghost_mode),
-                daemon=True,
-            ).start()
+            if not app_config.fix_dame_enabled:
+                net_state.R_G = True
+                net_state.W_G = pydivert.WinDivert(FILTER_F, layer=pydivert.Layer.NETWORK)
+                try: net_state.W_G.open()
+                except Exception: pass
+                threading.Thread(
+                    target=divert_shinmod,
+                    args=(FILTER_F, lambda: net_state.R_G, net_state.packet_ghost, lambda: net_state.ghost_mode),
+                    daemon=True,
+                ).start()
             active = True
 
     audio.play_ghost(active)
@@ -458,70 +519,100 @@ def toggle_tele():
                 try: net_state.W_T.close()
                 except Exception: pass
                 net_state.W_T = None
-            p = list(net_state.packet_tele)
-            net_state.packet_tele.clear()
-            if p:
-                if app_config.fix_dame_enabled:
-                    threading.Thread(target=send_packets, args=(p, FILTER_O), daemon=True).start()
-                else:
+            if not app_config.fix_dame_enabled:
+                p = list(net_state.packet_tele)
+                net_state.packet_tele.clear()
+                if p:
                     threading.Thread(target=lambda: send_burst_packets(p, FILTER_O, 10, 0, 0), daemon=True).start()
             active = False
         else:
             net_state.tele_mode = True
-            net_state.R_T = True
             net_state.tele_active_time = time.time()
-            net_state.W_T = pydivert.WinDivert(FILTER_O, layer=pydivert.Layer.NETWORK)
-            try: net_state.W_T.open()
-            except Exception: pass
-            threading.Thread(
-                target=divert,
-                args=(FILTER_O, lambda: net_state.R_T, net_state.packet_tele, lambda: net_state.tele_mode),
-                daemon=True,
-            ).start()
+            if not app_config.fix_dame_enabled:
+                net_state.R_T = True
+                net_state.W_T = pydivert.WinDivert(FILTER_O, layer=pydivert.Layer.NETWORK)
+                try: net_state.W_T.open()
+                except Exception: pass
+                threading.Thread(
+                    target=divert_shinmod,
+                    args=(FILTER_O, lambda: net_state.R_T, net_state.packet_tele, lambda: net_state.tele_mode),
+                    daemon=True,
+                ).start()
             active = True
 
     audio.play_tele(active)
     signals.notify.emit('Telekill', active)
 
-def toggle_aimlag():
+def toggle_aimlag_arm():
     if not net_state.is_injected: return
     with net_state.lock:
-        if net_state.aimlag_mode:
-            net_state.aimlag_mode = False
+        net_state.aimlag_armed = not net_state.aimlag_armed
+        active = net_state.aimlag_armed
+        if not active:
+            net_state.aimlag_blocking = False
+            net_state.mouse_held = False
             net_state.R_A = False
-            net_state.aimlag_active_time = 0.0
             if net_state.W_A:
                 try: net_state.W_A.close()
                 except Exception: pass
                 net_state.W_A = None
-            p = list(net_state.packet_aimlag)
-            net_state.packet_aimlag.clear()
-            if p:
-                threading.Thread(target=send_packets, args=(p, FILTER_AIMLAG), daemon=True).start()
-            active = False
-        else:
-            net_state.aimlag_mode = True
-            net_state.R_A = True
-            net_state.aimlag_active_time = time.time()
-            net_state.W_A = pydivert.WinDivert(FILTER_AIMLAG, layer=pydivert.Layer.NETWORK)
-            try: net_state.W_A.open()
-            except Exception: pass
-            threading.Thread(
-                target=divert,
-                args=(FILTER_AIMLAG, lambda: net_state.R_A, net_state.packet_aimlag, lambda: net_state.aimlag_mode),
-                daemon=True,
-            ).start()
-            active = True
+            if not app_config.fix_dame_enabled:
+                p = list(net_state.packet_aimlag)
+                net_state.packet_aimlag.clear()
+                if p:
+                    threading.Thread(target=send_packets, args=(p, FILTER_AIMLAG), daemon=True).start()
 
     audio.play_aimlag(active)
     signals.notify.emit('AimLag', active)
+
+# ================= HOOK CHUỘT CHO AIMLAG =================
+def on_mouse_click(x, y, button, pressed):
+    if not net_state.is_authenticated or not net_state.is_injected:
+        return
+
+    if button == pynput_mouse.Button.left:
+        with net_state.lock:
+            if not net_state.aimlag_armed:
+                return
+
+            if pressed:
+                if is_emulator_in_foreground() and not net_state.mouse_held:
+                    net_state.mouse_held = True
+                    net_state.aimlag_blocking = True
+                    if not app_config.fix_dame_enabled:
+                        net_state.R_A = True
+                        net_state.packet_aimlag.clear()
+                        net_state.W_A = pydivert.WinDivert(FILTER_AIMLAG, layer=pydivert.Layer.NETWORK)
+                        try: net_state.W_A.open()
+                        except Exception: pass
+                        threading.Thread(
+                            target=divert_shinmod,
+                            args=(FILTER_AIMLAG, lambda: net_state.R_A, net_state.packet_aimlag, lambda: net_state.aimlag_blocking),
+                            daemon=True,
+                        ).start()
+            else:
+                if net_state.mouse_held:
+                    net_state.mouse_held = False
+                    net_state.aimlag_blocking = False
+                    if not app_config.fix_dame_enabled:
+                        net_state.R_A = False
+                        if net_state.W_A:
+                            try: net_state.W_A.close()
+                            except Exception: pass
+                            net_state.W_A = None
+                        p = list(net_state.packet_aimlag)
+                        net_state.packet_aimlag.clear()
+                        if p:
+                            threading.Thread(target=send_packets, args=(p, FILTER_AIMLAG), daemon=True).start()
 
 def stop_all_features():
     with net_state.lock:
         net_state.tele_mode = False
         net_state.freeze_mode = False
         net_state.ghost_mode = False
-        net_state.aimlag_mode = False
+        net_state.aimlag_armed = False
+        net_state.aimlag_blocking = False
+        net_state.mouse_held = False
         net_state.R_I = net_state.R_G = net_state.R_T = net_state.R_A = False
         
         if net_state.W_I:
@@ -551,10 +642,11 @@ def stop_all_features():
         net_state.packet_ghost.clear()
         net_state.packet_aimlag.clear()
 
-    if pt: threading.Thread(target=lambda: send_burst_packets(pt, FILTER_O, 10, 0, 0), daemon=True).start()
-    if pf: threading.Thread(target=send_packets, args=(pf, FILTER_I), daemon=True).start()
-    if pg: threading.Thread(target=send_packets, args=(pg, FILTER_F), daemon=True).start()
-    if pa: threading.Thread(target=send_packets, args=(pa, FILTER_AIMLAG), daemon=True).start()
+    if not app_config.fix_dame_enabled:
+        if pt: threading.Thread(target=lambda: send_burst_packets(pt, FILTER_O, 10, 0, 0), daemon=True).start()
+        if pf: threading.Thread(target=send_packets, args=(pf, FILTER_I), daemon=True).start()
+        if pg: threading.Thread(target=send_packets, args=(pg, FILTER_F), daemon=True).start()
+        if pa: threading.Thread(target=send_packets, args=(pa, FILTER_AIMLAG), daemon=True).start()
 
     signals.notify.emit('Freeze', False)
     signals.notify.emit('Telekill', False)
@@ -577,9 +669,8 @@ def hotkey_loop():
                 t_time = net_state.tele_active_time
                 is_ghost = net_state.ghost_mode
                 g_time = net_state.ghost_active_time
-                is_aimlag = net_state.aimlag_mode
-                a_time = net_state.aimlag_active_time
 
+            # Chế độ Fix Dame ON: Tự động ngắt khi giữ quá lâu
             if app_config.fix_dame_enabled:
                 if is_freeze and f_time > 0 and (curr_t - f_time >= FREEZE_AUTO_DISABLE_SEC):
                     toggle_freeze()
@@ -587,8 +678,6 @@ def hotkey_loop():
                     toggle_tele()
                 if is_ghost and g_time > 0 and (curr_t - g_time >= GHOST_AUTO_DISABLE_SEC):
                     toggle_ghost()
-                if is_aimlag and a_time > 0 and (curr_t - a_time >= AIMLAG_AUTO_DISABLE_SEC):
-                    toggle_aimlag()
 
             cur_t = keyboard.is_pressed(app_config.tele_hotkey.key)
             if cur_t and not tp: toggle_tele()
@@ -603,7 +692,7 @@ def hotkey_loop():
             gp = cur_g
 
             cur_a = keyboard.is_pressed(app_config.aimlag_hotkey.key)
-            if cur_a and not ap: toggle_aimlag()
+            if cur_a and not ap: toggle_aimlag_arm()
             ap = cur_a
 
             cur_h = keyboard.is_pressed(app_config.hide_hotkey.key)
@@ -1364,10 +1453,10 @@ class MainTabPage(QWidget):
         self.btn_tele = self.create_key_row(layout, "TELEKILL", app_config.tele_hotkey, 'tele_hotkey')
         self.btn_freeze = self.create_key_row(layout, "FREEZE", app_config.freeze_hotkey, 'freeze_hotkey')
         self.btn_ghost = self.create_key_row(layout, "GHOST", app_config.ghost_hotkey, 'ghost_hotkey')
-        self.btn_aimlag = self.create_key_row(layout, "AIM LAG", app_config.aimlag_hotkey, 'aimlag_hotkey')
+        self.btn_aimlag = self.create_key_row(layout, "AIM LAG (ARM)", app_config.aimlag_hotkey, 'aimlag_hotkey')
 
         layout.addSpacing(4)
-        hint_lbl = QLabel("Bấm phím để Bật/Tắt các chức năng Fake Lag độc lập")
+        hint_lbl = QLabel("Bật ARM: Nhấn giữ chuột trái trong game sẽ Freeze, thả ra tắt")
         hint_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint_lbl.setStyleSheet("color: #71717a; font-size: 8.5px; font-weight: 500; font-family: 'Segoe UI', Arial;")
         layout.addWidget(hint_lbl)
@@ -1425,7 +1514,6 @@ class SettingTabPage(QWidget):
         layout.setContentsMargins(4, 2, 4, 2)
         layout.setSpacing(4)
 
-        # Lưới chứa 4 nút Beep riêng biệt
         grid = QGridLayout()
         grid.setSpacing(4)
 
@@ -1456,7 +1544,6 @@ class SettingTabPage(QWidget):
 
         layout.addLayout(grid)
 
-        # Nút bật/tắt Fix Dame
         self.fix_dame_btn = QPushButton()
         self.fix_dame_btn.setFixedHeight(26)
         self.fix_dame_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1505,6 +1592,7 @@ class SettingTabPage(QWidget):
         app_config.fix_dame_enabled = not app_config.fix_dame_enabled
         save_config()
         self.update_all_buttons()
+        stop_all_features()
 
 class KeybindsWidget(QWidget):
     def __init__(self, on_close_callback, parent=None):
@@ -1916,7 +2004,16 @@ if __name__ == '__main__':
     hud = OverlayHUD()
     rainbow = RainbowHeaderOverlay()
 
+    # Khởi chạy luồng xử lý gói tin cho chế độ Fix Dame ON
+    threading.Thread(target=master_divert_worker_fix_dame, daemon=True).start()
+    
+    # Khởi chạy luồng lắng nghe Hotkey
     threading.Thread(target=hotkey_loop, daemon=True).start()
+
+    # Khởi chạy Hook Chuột cho Aim Lag
+    mouse_listener = pynput_mouse.Listener(on_click=on_mouse_click)
+    mouse_listener.daemon = True
+    mouse_listener.start()
 
     keyboard.add_hotkey('f10', cleanup_and_exit)
     app.aboutToQuit.connect(cleanup_and_exit)
