@@ -26,6 +26,13 @@ except ImportError:
     import keyboard
 
 try:
+    import pynput
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "pynput"])
+    import pynput
+from pynput import mouse as pynput_mouse
+
+try:
     import requests
 except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
@@ -154,7 +161,7 @@ def find_emulator_window():
 # ================= CONFIG & NETWORK ENGINE =================
 HOTKEY_FILE = 'zerox_hotkey.json'
 MASTER_FILTER = "udp and ((udp.DstPort >= 7000 and udp.DstPort <= 18000) or (udp.SrcPort >= 7000 and udp.SrcPort <= 18000))"
-MAX_QUEUE_SIZE = 220
+MAX_QUEUE_SIZE = 300
 
 FREEZE_AUTO_DISABLE_SEC = 1.5
 TELE_AUTO_DISABLE_SEC = 2.0
@@ -183,6 +190,7 @@ class AppConfig:
         self.tele_hotkey = HotkeyConfig(key='f')
         self.freeze_hotkey = HotkeyConfig(key='e')
         self.ghost_hotkey = HotkeyConfig(key='v')
+        self.aimlag_hotkey = HotkeyConfig(key='c')
         self.hide_hotkey = HotkeyConfig(key='f7')
         self.stream_hotkey = HotkeyConfig(key='f8')
         self.beep_enabled = True
@@ -199,6 +207,7 @@ def load_config():
                 app_config.tele_hotkey.key = data.get('tele_hotkey', 'f')
                 app_config.freeze_hotkey.key = data.get('freeze_hotkey', 'e')
                 app_config.ghost_hotkey.key = data.get('ghost_hotkey', 'v')
+                app_config.aimlag_hotkey.key = data.get('aimlag_hotkey', 'c')
                 app_config.hide_hotkey.key = data.get('hide_hotkey', 'f7')
                 app_config.stream_hotkey.key = data.get('stream_hotkey', 'f8')
                 app_config.beep_enabled = data.get('beep_enabled', True)
@@ -213,6 +222,7 @@ def save_config():
             'tele_hotkey': app_config.tele_hotkey.key,
             'freeze_hotkey': app_config.freeze_hotkey.key,
             'ghost_hotkey': app_config.ghost_hotkey.key,
+            'aimlag_hotkey': app_config.aimlag_hotkey.key,
             'hide_hotkey': app_config.hide_hotkey.key,
             'stream_hotkey': app_config.stream_hotkey.key,
             'beep_enabled': app_config.beep_enabled,
@@ -254,6 +264,9 @@ class NetState:
         self.tele_mode = False
         self.freeze_mode = False
         self.ghost_mode = False
+        self.aimlag_armed = False
+        self.aimlag_active = False
+        self.mouse_held = False
         self.running = True
         self.is_authenticated = False
         self.is_injected = False
@@ -267,23 +280,32 @@ class NetState:
 net_state = NetState()
 
 # ================= DIVERTER ENGINE =================
+def send_burst_packets(packets, filter_str=MASTER_FILTER, burst_size=10, delay_per_pkt=0.0005, delay_between_burst=0.002):
+    if not packets:
+        return
+    try:
+        with pydivert.WinDivert(filter_str, layer=pydivert.Layer.NETWORK) as sender:
+            total = len(packets)
+            for i in range(0, total, burst_size):
+                burst = packets[i:i+burst_size]
+                for pkt in burst:
+                    sender.send(pkt)
+                    if delay_per_pkt > 0:
+                        time.sleep(delay_per_pkt)
+                if i + burst_size < total and delay_between_burst > 0:
+                    time.sleep(delay_between_burst)
+    except Exception as e:
+        debug_log(f"Burst send error: {e}")
+
 def master_divert_worker():
     inbound_queue = deque(maxlen=MAX_QUEUE_SIZE)
     outbound_legacy_queue = deque(maxlen=MAX_QUEUE_SIZE)
+    prev_tele = False
 
-    def flush_inbound(handle):
+    def flush_inbound_direct(handle):
         while inbound_queue:
             try:
                 pkt = inbound_queue.popleft()
-                handle.send(pkt)
-                net_state.total_passed += 1
-            except Exception:
-                pass
-
-    def flush_outbound(handle):
-        while outbound_legacy_queue:
-            try:
-                pkt = outbound_legacy_queue.popleft()
                 handle.send(pkt)
                 net_state.total_passed += 1
             except Exception:
@@ -304,13 +326,20 @@ def master_divert_worker():
 
                     with net_state.lock:
                         block_out = net_state.tele_mode or net_state.ghost_mode
-                        block_in = net_state.freeze_mode or net_state.ghost_mode
+                        block_in = net_state.freeze_mode or net_state.ghost_mode or net_state.aimlag_active
+                        curr_tele = net_state.tele_mode
 
+                    # Khi tắt chặn Inbound: xả toàn bộ gói tin để mạng mượt lại ngay lập tức
                     if not block_in and inbound_queue:
-                        flush_inbound(handle)
+                        flush_inbound_direct(handle)
 
-                    if not block_out and outbound_legacy_queue:
-                        flush_outbound(handle)
+                    # Khi Telekill vừa tắt ở chế độ Không Fix Dame: Kích hoạt Thread xả burst packet
+                    if prev_tele and not curr_tele and not app_config.fix_dame_enabled:
+                        if outbound_legacy_queue:
+                            pkts_to_burst = list(outbound_legacy_queue)
+                            outbound_legacy_queue.clear()
+                            threading.Thread(target=send_burst_packets, args=(pkts_to_burst,), daemon=True).start()
+                    prev_tele = curr_tele
 
                     if is_out:
                         if app_config.fix_dame_enabled:
@@ -321,6 +350,12 @@ def master_divert_worker():
                             if block_out:
                                 outbound_legacy_queue.append(packet)
                             else:
+                                while outbound_legacy_queue:
+                                    try:
+                                        handle.send(outbound_legacy_queue.popleft())
+                                        net_state.total_passed += 1
+                                    except Exception:
+                                        pass
                                 handle.send(packet)
                                 net_state.total_passed += 1
                     else:
@@ -332,6 +367,25 @@ def master_divert_worker():
         except Exception as e:
             debug_log(f"Divert error: {e}")
             time.sleep(0.1)
+
+# ================= MOUSE HOOK FOR AIMLAG =================
+def on_mouse_click(x, y, button, pressed):
+    if not net_state.is_authenticated or not net_state.is_injected:
+        return
+    if button == pynput_mouse.Button.left:
+        with net_state.lock:
+            if not net_state.aimlag_armed:
+                return
+            if pressed and not net_state.mouse_held:
+                net_state.mouse_held = True
+                net_state.aimlag_active = True
+                audio.play_on()
+                signals.notify.emit('AimLag', True)
+            elif not pressed and net_state.mouse_held:
+                net_state.mouse_held = False
+                net_state.aimlag_active = False
+                audio.play_off()
+                signals.notify.emit('AimLag', False)
 
 # ================= HOTKEY CONTROLLER =================
 def toggle_tele():
@@ -364,8 +418,20 @@ def toggle_ghost():
     (audio.play_on if active else audio.play_off)()
     signals.notify.emit('Ghost', active)
 
+def toggle_aimlag_arm():
+    if not net_state.is_injected: return
+    with net_state.lock:
+        net_state.aimlag_armed = not net_state.aimlag_armed
+        if not net_state.aimlag_armed:
+            net_state.aimlag_active = False
+            net_state.mouse_held = False
+            signals.notify.emit('AimLag', False)
+        active = net_state.aimlag_armed
+
+    (audio.play_on if active else audio.play_off)()
+
 def hotkey_loop():
-    tp = gp = fp = hp = sp = False
+    tp = gp = fp = ap = hp = sp = False
     while net_state.running:
         try:
             if not net_state.is_authenticated or not net_state.is_injected:
@@ -414,6 +480,10 @@ def hotkey_loop():
             cur_g = keyboard.is_pressed(app_config.ghost_hotkey.key)
             if cur_g and not gp: toggle_ghost()
             gp = cur_g
+
+            cur_a = keyboard.is_pressed(app_config.aimlag_hotkey.key)
+            if cur_a and not ap: toggle_aimlag_arm()
+            ap = cur_a
 
             cur_h = keyboard.is_pressed(app_config.hide_hotkey.key)
             if cur_h and not hp: signals.toggle_visibility.emit()
@@ -562,7 +632,7 @@ class Particle:
 class CustomParticleFrame(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.particles = [Particle(340, 240) for _ in range(30)]
+        self.particles = [Particle(340, 255) for _ in range(30)]
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.animate_particles)
         self.timer.start(33)
@@ -1168,38 +1238,39 @@ class MainTabPage(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(5)
+        layout.setSpacing(4)
 
         self.btn_tele = self.create_key_row(layout, "TELEKILL", app_config.tele_hotkey, 'tele_hotkey')
         self.btn_freeze = self.create_key_row(layout, "FREEZE", app_config.freeze_hotkey, 'freeze_hotkey')
         self.btn_ghost = self.create_key_row(layout, "GHOST", app_config.ghost_hotkey, 'ghost_hotkey')
+        self.btn_aimlag = self.create_key_row(layout, "AIM LAG (ARM)", app_config.aimlag_hotkey, 'aimlag_hotkey')
 
         layout.addSpacing(2)
-        hint_lbl = QLabel("Click button then press a key to bind")
+        hint_lbl = QLabel("Aim Lag: Bật phím ARM rồi nhấn giữ chuột trái để Freeze")
         hint_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint_lbl.setStyleSheet("color: #71717a; font-size: 9.5px; font-weight: 500; font-family: 'Segoe UI', Arial;")
+        hint_lbl.setStyleSheet("color: #71717a; font-size: 9px; font-weight: 500; font-family: 'Segoe UI', Arial;")
         layout.addWidget(hint_lbl)
         layout.addStretch()
 
     def create_key_row(self, parent_layout, label_text, config_obj, config_key):
         row = QHBoxLayout()
-        row.setContentsMargins(4, 2, 4, 2)
+        row.setContentsMargins(4, 1, 4, 1)
 
         lbl = QLabel(label_text)
-        lbl.setStyleSheet("color: #f4f4f5; font-size: 11.5px; font-weight: 700; font-family: 'Segoe UI', Arial; letter-spacing: 1px;")
+        lbl.setStyleSheet("color: #f4f4f5; font-size: 11px; font-weight: 700; font-family: 'Segoe UI', Arial; letter-spacing: 0.8px;")
         row.addWidget(lbl)
         row.addStretch()
 
         btn = QPushButton(config_obj.key.upper())
-        btn.setFixedSize(62, 26)
+        btn.setFixedSize(58, 24)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setStyleSheet("""
             QPushButton {
                 background-color: #12151c;
                 color: #ffffff;
                 border: 1px solid #222733;
-                border-radius: 6px;
-                font-size: 11px;
+                border-radius: 5px;
+                font-size: 10.5px;
                 font-weight: 700;
                 font-family: 'Segoe UI', Arial;
             }
@@ -1233,7 +1304,6 @@ class SettingTabPage(QWidget):
         layout.setContentsMargins(6, 6, 6, 2)
         layout.setSpacing(6)
 
-        # Sound Button
         self.sound_btn = QPushButton("Sound: ON" if app_config.beep_enabled else "Sound: OFF")
         self.sound_btn.setFixedHeight(30)
         self.sound_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1256,7 +1326,6 @@ class SettingTabPage(QWidget):
         self.sound_btn.clicked.connect(self.toggle_sound)
         layout.addWidget(self.sound_btn)
 
-        # Fix Dame Button
         self.fix_dame_btn = QPushButton()
         self.fix_dame_btn.setFixedHeight(30)
         self.fix_dame_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1304,11 +1373,9 @@ class KeybindsWidget(QWidget):
         layout.setContentsMargins(12, 6, 12, 8)
         layout.setSpacing(4)
 
-        # 1. Top Bar ở trên cùng
         self.top_bar = TopBar("KEYBINDS", on_close=on_close_callback)
         layout.addWidget(self.top_bar)
 
-        # 2. Sliding Stacked Tab Body ở giữa
         self.tab_stack = SlidingStackedWidget(self)
         self.main_page = MainTabPage(self)
         self.setting_page = SettingTabPage(self)
@@ -1317,7 +1384,6 @@ class KeybindsWidget(QWidget):
         self.tab_stack.addWidget(self.setting_page)
         layout.addWidget(self.tab_stack)
 
-        # 3. Tab Selector Bar được chuyển xuống dưới cùng
         tab_bar_layout = QHBoxLayout()
         tab_bar_layout.setSpacing(6)
         tab_bar_layout.setContentsMargins(4, 2, 4, 0)
@@ -1510,7 +1576,7 @@ class OverlayHUD(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.setFixedSize(160, 180)
+        self.setFixedSize(160, 200)
 
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
@@ -1520,7 +1586,8 @@ class OverlayHUD(QWidget):
         self.items = {}
         for key, text, color in [("Freeze", "FREEZE ACTIVE", "#00f0ff"),
                                  ("Telekill", "TELEPKILL ACTIVE", "#7000ff"),
-                                 ("Ghost", "GHOST ACTIVE", "#00ff88")]:
+                                 ("Ghost", "GHOST ACTIVE", "#00ff88"),
+                                 ("AimLag", "AIMLAG FREEZE", "#ff8800")]:
             lbl = QLabel(f" {text}")
             lbl.setFixedHeight(22)
             lbl.setStyleSheet(f"""
@@ -1589,10 +1656,10 @@ class MainContainerWindow(QWidget):
         self.setWindowTitle(AntiBan.get_title())
         self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.resize(340, 240)
+        self.resize(340, 255)
 
         self.bg_frame = CustomParticleFrame(self)
-        self.bg_frame.setGeometry(0, 0, 340, 240)
+        self.bg_frame.setGeometry(0, 0, 340, 255)
 
         layout = QVBoxLayout(self.bg_frame)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1652,6 +1719,9 @@ class MainContainerWindow(QWidget):
             net_state.tele_mode = False
             net_state.freeze_mode = False
             net_state.ghost_mode = False
+            net_state.aimlag_armed = False
+            net_state.aimlag_active = False
+            net_state.mouse_held = False
             net_state.tele_active_time = 0.0
             net_state.freeze_active_time = 0.0
             net_state.ghost_active_time = 0.0
@@ -1663,6 +1733,7 @@ class MainContainerWindow(QWidget):
         signals.notify.emit('Freeze', False)
         signals.notify.emit('Telekill', False)
         signals.notify.emit('Ghost', False)
+        signals.notify.emit('AimLag', False)
 
         if not self.isVisible():
             self.show()
@@ -1702,6 +1773,7 @@ def cleanup_and_exit():
         net_state.tele_mode = False
         net_state.freeze_mode = False
         net_state.ghost_mode = False
+        net_state.aimlag_active = False
     try: keyboard.unhook_all()
     except Exception: pass
     QApplication.quit()
@@ -1724,6 +1796,11 @@ if __name__ == '__main__':
 
     threading.Thread(target=master_divert_worker, daemon=True).start()
     threading.Thread(target=hotkey_loop, daemon=True).start()
+
+    # Khởi chạy Hook Chuột Bắt Nút Bắn (AimLag)
+    mouse_listener = pynput_mouse.Listener(on_click=on_mouse_click)
+    mouse_listener.daemon = True
+    mouse_listener.start()
 
     keyboard.add_hotkey('f10', cleanup_and_exit)
     app.aboutToQuit.connect(cleanup_and_exit)
