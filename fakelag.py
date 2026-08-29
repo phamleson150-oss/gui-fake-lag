@@ -1430,7 +1430,7 @@ class MainTabPage(QWidget):
         self.btn_aimlag = self.create_key_row(layout, "AIM LAG ", app_config.aimlag_hotkey, 'aimlag_hotkey')
 
         layout.addSpacing(4)
-        hint_lbl = QLabel("Bật ARM: Nhấn giữ chuột trái trong game sẽ Freeze, thả ra tắt")
+        hint_lbl = QLabel("Dev:Le Son")
         hint_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint_lbl.setStyleSheet("color: #71717a; font-size: 8.5px; font-weight: 500; font-family: 'Segoe UI', Arial;")
         layout.addWidget(hint_lbl)
