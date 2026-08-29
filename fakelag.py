@@ -25,13 +25,6 @@ except ImportError:
     import keyboard
 
 try:
-    import pynput
-except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "pynput"])
-    import pynput
-from pynput import mouse as pynput_mouse
-
-try:
     import requests
 except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
@@ -158,13 +151,6 @@ def find_emulator_window():
     ctypes.windll.user32.EnumWindows(WNDENUMPROC(enum_windows_callback), 0)
     return detected[0] if detected else (None, "None")
 
-def is_emulator_in_foreground():
-    fg_hwnd = ctypes.windll.user32.GetForegroundWindow()
-    if not fg_hwnd:
-        return False
-    pname = get_process_name_by_hwnd(fg_hwnd)
-    return any(proc in pname for proc in EMULATOR_PROCESSES)
-
 # ================= FILTERS CHUẨN SHINMOD =================
 FILTER_FREEZE = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
 FILTER_F      = "(udp.PayloadLength >= 53 and udp.PayloadLength <= 170) and (udp.DstPort >= 10011 and udp.DstPort <= 10020)"
@@ -172,11 +158,12 @@ FILTER_I      = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.P
 FILTER_O      = "udp.DstPort >= 10010 and udp.DstPort <= 10020 and udp.PayloadLength >= 35"
 FILTER_AIMLAG = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
 
-MAX_PACKETS = 80
+MAX_PACKETS = 100
 
 FREEZE_AUTO_DISABLE_SEC = 1.5
 TELE_AUTO_DISABLE_SEC = 2.0
 GHOST_AUTO_DISABLE_SEC = 2.5
+AIMLAG_AUTO_DISABLE_SEC = 1.5
 
 HOTKEY_FILE = 'zerox_hotkey.json'
 
@@ -207,7 +194,6 @@ class AppConfig:
         self.hide_hotkey = HotkeyConfig(key='f7')
         self.stream_hotkey = HotkeyConfig(key='f8')
         
-        # Tùy chỉnh Beep độc lập cho từng chức năng
         self.beep_tele = True
         self.beep_freeze = True
         self.beep_ghost = True
@@ -284,7 +270,7 @@ class AudioManager:
 
     def play_aimlag(self, active):
         if app_config.beep_aimlag:
-            self.beep(850 if active else 380, 60)
+            self.beep(850 if active else 380, 75)
 
 audio = AudioManager()
 
@@ -304,9 +290,7 @@ class NetState:
         self.tele_mode = False
         self.freeze_mode = False
         self.ghost_mode = False
-        self.aimlag_armed = False
         self.aimlag_mode = False
-        self.mouse_held = False
 
         self.R_I = False
         self.W_I = None
@@ -331,6 +315,7 @@ class NetState:
         self.freeze_active_time = 0.0
         self.tele_active_time = 0.0
         self.ghost_active_time = 0.0
+        self.aimlag_active_time = 0.0
 
 net_state = NetState()
 
@@ -395,7 +380,7 @@ def divert(filter_str, flag_ref, packet_list, cond_ref):
         try: h.close()
         except Exception: pass
 
-# ================= CHỨC NĂNG FAKE LAG =================
+# ================= CHỨC NĂNG FAKE LAG BẬT TẮT QUA HOTKEY =================
 def toggle_freeze():
     if not net_state.is_injected: return
     with net_state.lock:
@@ -498,27 +483,13 @@ def toggle_tele():
     audio.play_tele(active)
     signals.notify.emit('Telekill', active)
 
-def toggle_aimlag_arm():
+def toggle_aimlag():
     if not net_state.is_injected: return
     with net_state.lock:
-        net_state.aimlag_armed = not net_state.aimlag_armed
-        active = net_state.aimlag_armed
-        if active:
-            # Khởi tạo trước luồng thu nhận WinDivert để khi click chuột không bị delay
-            net_state.R_A = False
-            net_state.packet_aimlag.clear()
-            net_state.W_A = pydivert.WinDivert(FILTER_AIMLAG, layer=pydivert.Layer.NETWORK)
-            try: net_state.W_A.open()
-            except Exception: pass
-            threading.Thread(
-                target=divert,
-                args=(FILTER_AIMLAG, lambda: (net_state.aimlag_armed and net_state.R_A), net_state.packet_aimlag, lambda: net_state.aimlag_mode),
-                daemon=True,
-            ).start()
-        else:
+        if net_state.aimlag_mode:
             net_state.aimlag_mode = False
             net_state.R_A = False
-            net_state.mouse_held = False
+            net_state.aimlag_active_time = 0.0
             if net_state.W_A:
                 try: net_state.W_A.close()
                 except Exception: pass
@@ -527,37 +498,23 @@ def toggle_aimlag_arm():
             net_state.packet_aimlag.clear()
             if p:
                 threading.Thread(target=send_packets, args=(p, FILTER_AIMLAG), daemon=True).start()
+            active = False
+        else:
+            net_state.aimlag_mode = True
+            net_state.R_A = True
+            net_state.aimlag_active_time = time.time()
+            net_state.W_A = pydivert.WinDivert(FILTER_AIMLAG, layer=pydivert.Layer.NETWORK)
+            try: net_state.W_A.open()
+            except Exception: pass
+            threading.Thread(
+                target=divert,
+                args=(FILTER_AIMLAG, lambda: net_state.R_A, net_state.packet_aimlag, lambda: net_state.aimlag_mode),
+                daemon=True,
+            ).start()
+            active = True
 
     audio.play_aimlag(active)
     signals.notify.emit('AimLag', active)
-
-# ================= HOOK CHUỘT: TỐI ƯU KHÔNG DELAY =================
-def on_mouse_click(x, y, button, pressed):
-    if not net_state.is_authenticated or not net_state.is_injected:
-        return
-
-    if button == pynput_mouse.Button.left:
-        with net_state.lock:
-            if not net_state.aimlag_armed:
-                return
-
-            if pressed:
-                # Bấm giữ chuột trái trong game -> Chặn gói tin ngay lập tức
-                if is_emulator_in_foreground() and not net_state.mouse_held:
-                    net_state.mouse_held = True
-                    net_state.aimlag_mode = True
-                    net_state.R_A = True
-                    net_state.packet_aimlag.clear()
-            else:
-                # Nhả chuột -> Xả tức thì danh sách gói tin, mạng thông suốt ngay
-                if net_state.mouse_held:
-                    net_state.mouse_held = False
-                    net_state.aimlag_mode = False
-                    net_state.R_A = False
-                    p = list(net_state.packet_aimlag)
-                    net_state.packet_aimlag.clear()
-                    if p:
-                        threading.Thread(target=send_packets, args=(p, FILTER_AIMLAG), daemon=True).start()
 
 def stop_all_features():
     with net_state.lock:
@@ -565,8 +522,6 @@ def stop_all_features():
         net_state.freeze_mode = False
         net_state.ghost_mode = False
         net_state.aimlag_mode = False
-        net_state.aimlag_armed = False
-        net_state.mouse_held = False
         net_state.R_I = net_state.R_G = net_state.R_T = net_state.R_A = False
         
         if net_state.W_I:
@@ -622,6 +577,8 @@ def hotkey_loop():
                 t_time = net_state.tele_active_time
                 is_ghost = net_state.ghost_mode
                 g_time = net_state.ghost_active_time
+                is_aimlag = net_state.aimlag_mode
+                a_time = net_state.aimlag_active_time
 
             if app_config.fix_dame_enabled:
                 if is_freeze and f_time > 0 and (curr_t - f_time >= FREEZE_AUTO_DISABLE_SEC):
@@ -630,6 +587,8 @@ def hotkey_loop():
                     toggle_tele()
                 if is_ghost and g_time > 0 and (curr_t - g_time >= GHOST_AUTO_DISABLE_SEC):
                     toggle_ghost()
+                if is_aimlag and a_time > 0 and (curr_t - a_time >= AIMLAG_AUTO_DISABLE_SEC):
+                    toggle_aimlag()
 
             cur_t = keyboard.is_pressed(app_config.tele_hotkey.key)
             if cur_t and not tp: toggle_tele()
@@ -644,7 +603,7 @@ def hotkey_loop():
             gp = cur_g
 
             cur_a = keyboard.is_pressed(app_config.aimlag_hotkey.key)
-            if cur_a and not ap: toggle_aimlag_arm()
+            if cur_a and not ap: toggle_aimlag()
             ap = cur_a
 
             cur_h = keyboard.is_pressed(app_config.hide_hotkey.key)
@@ -1405,10 +1364,10 @@ class MainTabPage(QWidget):
         self.btn_tele = self.create_key_row(layout, "TELEKILL", app_config.tele_hotkey, 'tele_hotkey')
         self.btn_freeze = self.create_key_row(layout, "FREEZE", app_config.freeze_hotkey, 'freeze_hotkey')
         self.btn_ghost = self.create_key_row(layout, "GHOST", app_config.ghost_hotkey, 'ghost_hotkey')
-        self.btn_aimlag = self.create_key_row(layout, "AIM LAG (ARM)", app_config.aimlag_hotkey, 'aimlag_hotkey')
+        self.btn_aimlag = self.create_key_row(layout, "AIM LAG", app_config.aimlag_hotkey, 'aimlag_hotkey')
 
         layout.addSpacing(4)
-        hint_lbl = QLabel("Bật ARM: Nhấn chuột trái trong game sẽ Freeze, thả ra tắt")
+        hint_lbl = QLabel("Bấm phím để Bật/Tắt các chức năng Fake Lag độc lập")
         hint_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint_lbl.setStyleSheet("color: #71717a; font-size: 8.5px; font-weight: 500; font-family: 'Segoe UI', Arial;")
         layout.addWidget(hint_lbl)
@@ -1958,11 +1917,6 @@ if __name__ == '__main__':
     rainbow = RainbowHeaderOverlay()
 
     threading.Thread(target=hotkey_loop, daemon=True).start()
-
-    # Hook Chuột: Bắt sự kiện bấm chuột trái trong game
-    mouse_listener = pynput_mouse.Listener(on_click=on_mouse_click)
-    mouse_listener.daemon = True
-    mouse_listener.start()
 
     keyboard.add_hotkey('f10', cleanup_and_exit)
     app.aboutToQuit.connect(cleanup_and_exit)
