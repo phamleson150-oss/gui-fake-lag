@@ -115,7 +115,7 @@ class POINT(ctypes.Structure):
 
 EMULATOR_PROCESSES = [
     "hd-player.exe", "bluestacks.exe", "dnplayer.exe", 
-    "nox.exe", "memu.exe", "projecttitan.exe", "androidprocess.exe", "gameloop.exe"
+    "nox.exe", "memu.exe", "projecttitan.exe", "androidprocess.exe", "gameloop.exe", "bstk.exe"
 ]
 
 def get_process_name_by_hwnd(hwnd):
@@ -165,34 +165,14 @@ def is_emulator_in_foreground():
     pname = get_process_name_by_hwnd(fg_hwnd)
     return any(proc in pname for proc in EMULATOR_PROCESSES)
 
-def is_click_on_fire_button(x, y):
-    hwnd, _ = find_emulator_window()
-    if not hwnd or not ctypes.windll.user32.IsWindow(hwnd):
-        return False
-    
-    rect = RECT()
-    ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect))
-    if not (rect.left <= x <= rect.right and rect.top <= y <= rect.bottom):
-        return False
-    
-    # Nếu đã cài tọa độ nút bắn -> kiểm tra khoảng cách
-    if app_config.fire_pos_x != -1 and app_config.fire_pos_y != -1:
-        rel_x = x - rect.left
-        rel_y = y - rect.top
-        dist = ((rel_x - app_config.fire_pos_x)**2 + (rel_y - app_config.fire_pos_y)**2)**0.5
-        return dist <= app_config.fire_radius
-    
-    # Nếu chưa cài tọa độ, mặc định kiểm tra xem có đang thao tác trong giả lập không
-    return is_emulator_in_foreground()
-
-# ================= FILTERS & MULTI-THREAD NETWORK ENGINE =================
-FILTER_FREEZE = "udp and ((udp.SrcPort >= 7000 and udp.SrcPort <= 18000) or (udp.DstPort >= 7000 and udp.DstPort <= 18000))"
+# ================= FILTERS CHUẨN TỪ SHINMOD =================
+FILTER_FREEZE = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
 FILTER_F      = "(udp.PayloadLength >= 53 and udp.PayloadLength <= 170) and (udp.DstPort >= 10011 and udp.DstPort <= 10020)"
-FILTER_I      = "(udp.SrcPort >= 7000 and udp.SrcPort <= 18000) and ip and ip.Protocol == 17"
-FILTER_O      = "(udp.DstPort >= 7000 and udp.DstPort <= 18000) and ip and ip.Protocol == 17"
-FILTER_AIMLAG = "(udp.SrcPort >= 7000 and udp.SrcPort <= 18000) and ip and ip.Protocol == 17"
+FILTER_I      = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
+FILTER_O      = "udp.DstPort >= 10010 and udp.DstPort <= 10020 and udp.PayloadLength >= 35"
+FILTER_AIMLAG = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
 
-MAX_PACKETS = 200
+MAX_PACKETS = 100
 
 FREEZE_AUTO_DISABLE_SEC = 1.5
 TELE_AUTO_DISABLE_SEC = 2.0
@@ -229,9 +209,6 @@ class AppConfig:
         self.beep_enabled = True
         self.stream_mode = False
         self.fix_dame_enabled = True
-        self.fire_pos_x = -1
-        self.fire_pos_y = -1
-        self.fire_radius = 75
 
 app_config = AppConfig()
 
@@ -249,9 +226,6 @@ def load_config():
                 app_config.beep_enabled = data.get('beep_enabled', True)
                 app_config.stream_mode = data.get('stream_mode', False)
                 app_config.fix_dame_enabled = data.get('fix_dame_enabled', True)
-                app_config.fire_pos_x = data.get('fire_pos_x', -1)
-                app_config.fire_pos_y = data.get('fire_pos_y', -1)
-                app_config.fire_radius = data.get('fire_radius', 75)
     except Exception as e:
         debug_log(f"Config load error: {e}")
 
@@ -266,10 +240,7 @@ def save_config():
             'stream_hotkey': app_config.stream_hotkey.key,
             'beep_enabled': app_config.beep_enabled,
             'stream_mode': app_config.stream_mode,
-            'fix_dame_enabled': app_config.fix_dame_enabled,
-            'fire_pos_x': app_config.fire_pos_x,
-            'fire_pos_y': app_config.fire_pos_y,
-            'fire_radius': app_config.fire_radius
+            'fix_dame_enabled': app_config.fix_dame_enabled
         }
         with open(HOTKEY_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2)
@@ -297,7 +268,6 @@ class AppSignals(QObject):
     toggle_visibility = pyqtSignal()
     start_tracking = pyqtSignal()
     key_expired = pyqtSignal()
-    update_calib_ui = pyqtSignal()
 
 signals = AppSignals()
 
@@ -310,12 +280,15 @@ class NetState:
         self.aimlag_armed = False
         self.aimlag_mode = False
         self.mouse_held = False
-        self.calibrating_fire_pos = False
-        
+
         self.R_I = False
+        self.W_I = None
         self.R_G = False
+        self.W_G = None
         self.R_T = False
+        self.W_T = None
         self.R_A = False
+        self.W_A = None
 
         self.packet_freeze = []
         self.packet_ghost = []
@@ -334,9 +307,10 @@ class NetState:
 
 net_state = NetState()
 
-# ================= THREADED PACKET PROCESSING =================
+# ================= CÁC THREADS XỬ LÝ GÓI TIN CHUẨN SHINMOD =================
 def send_packets(lst, f):
-    if not lst: return
+    if not lst:
+        return
     try:
         with pydivert.WinDivert(f, layer=pydivert.Layer.NETWORK) as s:
             for pkt in lst:
@@ -344,8 +318,9 @@ def send_packets(lst, f):
     except Exception as e:
         debug_log(f"send_packets error: {e}")
 
-def send_burst_packets(packets, filter_str, burst_size=10, delay_per_pkt=0.0002, delay_between_burst=0.001):
-    if not packets: return
+def send_burst_packets(packets, filter_str, burst_size=10, delay_per_pkt=0, delay_between_burst=0):
+    if not packets:
+        return
     try:
         with pydivert.WinDivert(filter_str, layer=pydivert.Layer.NETWORK) as sender:
             total = len(packets)
@@ -360,23 +335,23 @@ def send_burst_packets(packets, filter_str, burst_size=10, delay_per_pkt=0.0002,
     except Exception as e:
         debug_log(f"send_burst_packets error: {e}")
 
-def divert_worker(filter_str, flag_ref, packet_list, cond_ref):
+def divert(filter_str, flag_ref, packet_list, cond_ref):
     h = None
     while net_state.running and net_state.is_authenticated and net_state.is_injected:
         if not flag_ref():
             if h:
                 try: h.close()
                 except Exception: pass
-                h = None
-            time.sleep(0.015)
+            h = None
+            time.sleep(0.05)
             continue
         if h is None:
             try:
-                h = pydivert.WinDivert(filter_str, layer=pydivert.Layer.NETWORK)
+                h = pydivert.WinDivert(filter_str)
                 h.open()
             except Exception as e:
                 debug_log(f"Divert open error on {filter_str}: {e}")
-                time.sleep(0.05)
+                time.sleep(0.1)
                 continue
         try:
             for pkt in h:
@@ -388,12 +363,12 @@ def divert_worker(filter_str, flag_ref, packet_list, cond_ref):
                     packet_list.append(pydivert.Packet(pkt.raw, pkt.interface, pkt.direction))
         except Exception:
             pass
-        time.sleep(0.015)
+        time.sleep(0.05)
     if h:
         try: h.close()
         except Exception: pass
 
-# ================= HOTKEY & FEATURE TOGGLES =================
+# ================= CHỨC NĂNG FAKE LAG =================
 def toggle_freeze():
     if not net_state.is_injected: return
     with net_state.lock:
@@ -401,6 +376,10 @@ def toggle_freeze():
             net_state.freeze_mode = False
             net_state.R_I = False
             net_state.freeze_active_time = 0.0
+            if net_state.W_I:
+                try: net_state.W_I.close()
+                except Exception: pass
+                net_state.W_I = None
             p = list(net_state.packet_freeze)
             net_state.packet_freeze.clear()
             if p:
@@ -410,10 +389,13 @@ def toggle_freeze():
             net_state.freeze_mode = True
             net_state.R_I = True
             net_state.freeze_active_time = time.time()
+            net_state.W_I = pydivert.WinDivert(FILTER_I, layer=pydivert.Layer.NETWORK)
+            try: net_state.W_I.open()
+            except Exception: pass
             threading.Thread(
-                target=divert_worker,
+                target=divert,
                 args=(FILTER_I, lambda: net_state.R_I, net_state.packet_freeze, lambda: net_state.freeze_mode),
-                daemon=True
+                daemon=True,
             ).start()
             active = True
 
@@ -427,6 +409,10 @@ def toggle_ghost():
             net_state.ghost_mode = False
             net_state.R_G = False
             net_state.ghost_active_time = 0.0
+            if net_state.W_G:
+                try: net_state.W_G.close()
+                except Exception: pass
+                net_state.W_G = None
             p = list(net_state.packet_ghost)
             net_state.packet_ghost.clear()
             if p:
@@ -436,10 +422,13 @@ def toggle_ghost():
             net_state.ghost_mode = True
             net_state.R_G = True
             net_state.ghost_active_time = time.time()
+            net_state.W_G = pydivert.WinDivert(FILTER_F, layer=pydivert.Layer.NETWORK)
+            try: net_state.W_G.open()
+            except Exception: pass
             threading.Thread(
-                target=divert_worker,
+                target=divert,
                 args=(FILTER_F, lambda: net_state.R_G, net_state.packet_ghost, lambda: net_state.ghost_mode),
-                daemon=True
+                daemon=True,
             ).start()
             active = True
 
@@ -453,22 +442,30 @@ def toggle_tele():
             net_state.tele_mode = False
             net_state.R_T = False
             net_state.tele_active_time = 0.0
+            if net_state.W_T:
+                try: net_state.W_T.close()
+                except Exception: pass
+                net_state.W_T = None
             p = list(net_state.packet_tele)
             net_state.packet_tele.clear()
             if p:
                 if app_config.fix_dame_enabled:
                     threading.Thread(target=send_packets, args=(p, FILTER_O), daemon=True).start()
                 else:
-                    threading.Thread(target=send_burst_packets, args=(p, FILTER_O, 10, 0, 0), daemon=True).start()
+                    # Chế độ Không Fix Dame sử dụng burst thread xả dồn dập
+                    threading.Thread(target=lambda: send_burst_packets(p, FILTER_O, 10, 0, 0), daemon=True).start()
             active = False
         else:
             net_state.tele_mode = True
             net_state.R_T = True
             net_state.tele_active_time = time.time()
+            net_state.W_T = pydivert.WinDivert(FILTER_O, layer=pydivert.Layer.NETWORK)
+            try: net_state.W_T.open()
+            except Exception: pass
             threading.Thread(
-                target=divert_worker,
+                target=divert,
                 args=(FILTER_O, lambda: net_state.R_T, net_state.packet_tele, lambda: net_state.tele_mode),
-                daemon=True
+                daemon=True,
             ).start()
             active = True
 
@@ -484,6 +481,10 @@ def toggle_aimlag_arm():
             net_state.aimlag_mode = False
             net_state.R_A = False
             net_state.mouse_held = False
+            if net_state.W_A:
+                try: net_state.W_A.close()
+                except Exception: pass
+                net_state.W_A = None
             p = list(net_state.packet_aimlag)
             net_state.packet_aimlag.clear()
             if p:
@@ -492,25 +493,10 @@ def toggle_aimlag_arm():
     (audio.play_on if active else audio.play_off)()
     signals.notify.emit('AimLag', active)
 
-# ================= MOUSE HOOK: BẮT ĐÚNG NÚT BẮN TRONG GAME =================
+# ================= HOOK CHUỘT: NHẤN LÀ FREEZE - THẢ LÀ HỒI MẠNG =================
 def on_mouse_click(x, y, button, pressed):
     if not net_state.is_authenticated or not net_state.is_injected:
         return
-
-    # Chế độ cài đặt vị trí nút bắn bằng thao tác click chuột
-    if net_state.calibrating_fire_pos and pressed and button == pynput_mouse.Button.left:
-        hwnd, _ = find_emulator_window()
-        if hwnd:
-            rect = RECT()
-            ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect))
-            if rect.left <= x <= rect.right and rect.top <= y <= rect.bottom:
-                app_config.fire_pos_x = int(x - rect.left)
-                app_config.fire_pos_y = int(y - rect.top)
-                save_config()
-                net_state.calibrating_fire_pos = False
-                audio.play_on()
-                signals.update_calib_ui.emit()
-                return
 
     if button == pynput_mouse.Button.left:
         with net_state.lock:
@@ -518,24 +504,31 @@ def on_mouse_click(x, y, button, pressed):
                 return
 
             if pressed:
-                # Chỉ khi click trúng phạm vi nút bắn trong game
-                if is_click_on_fire_button(x, y) and not net_state.mouse_held:
+                # Chỉ freeze khi nhấn chuột trong cửa sổ game
+                if is_emulator_in_foreground() and not net_state.mouse_held:
                     net_state.mouse_held = True
                     net_state.aimlag_mode = True
                     net_state.R_A = True
                     net_state.packet_aimlag.clear()
+                    net_state.W_A = pydivert.WinDivert(FILTER_AIMLAG, layer=pydivert.Layer.NETWORK)
+                    try: net_state.W_A.open()
+                    except Exception: pass
                     threading.Thread(
-                        target=divert_worker,
+                        target=divert,
                         args=(FILTER_AIMLAG, lambda: net_state.R_A, net_state.packet_aimlag, lambda: net_state.aimlag_mode),
-                        daemon=True
+                        daemon=True,
                     ).start()
                     audio.play_on()
             else:
-                # Nhả nút bắn -> Tắt Freeze và xả toàn bộ gói tin để gây dame tức thì
+                # Nhả chuột -> Tắt Freeze và xả toàn bộ gói tin tức thì
                 if net_state.mouse_held:
                     net_state.mouse_held = False
                     net_state.aimlag_mode = False
                     net_state.R_A = False
+                    if net_state.W_A:
+                        try: net_state.W_A.close()
+                        except Exception: pass
+                        net_state.W_A = None
                     p = list(net_state.packet_aimlag)
                     net_state.packet_aimlag.clear()
                     if p:
@@ -550,9 +543,25 @@ def stop_all_features():
         net_state.aimlag_mode = False
         net_state.aimlag_armed = False
         net_state.mouse_held = False
-        net_state.calibrating_fire_pos = False
         net_state.R_I = net_state.R_G = net_state.R_T = net_state.R_A = False
         
+        if net_state.W_I:
+            try: net_state.W_I.close()
+            except Exception: pass
+            net_state.W_I = None
+        if net_state.W_G:
+            try: net_state.W_G.close()
+            except Exception: pass
+            net_state.W_G = None
+        if net_state.W_T:
+            try: net_state.W_T.close()
+            except Exception: pass
+            net_state.W_T = None
+        if net_state.W_A:
+            try: net_state.W_A.close()
+            except Exception: pass
+            net_state.W_A = None
+
         pt = list(net_state.packet_tele)
         pf = list(net_state.packet_freeze)
         pg = list(net_state.packet_ghost)
@@ -563,7 +572,7 @@ def stop_all_features():
         net_state.packet_ghost.clear()
         net_state.packet_aimlag.clear()
 
-    if pt: threading.Thread(target=send_packets, args=(pt, FILTER_O), daemon=True).start()
+    if pt: threading.Thread(target=lambda: send_burst_packets(pt, FILTER_O, 10, 0, 0), daemon=True).start()
     if pf: threading.Thread(target=send_packets, args=(pf, FILTER_I), daemon=True).start()
     if pg: threading.Thread(target=send_packets, args=(pg, FILTER_F), daemon=True).start()
     if pa: threading.Thread(target=send_packets, args=(pa, FILTER_AIMLAG), daemon=True).start()
@@ -761,7 +770,7 @@ class Particle:
 class CustomParticleFrame(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.particles = [Particle(340, 275) for _ in range(30)]
+        self.particles = [Particle(340, 255) for _ in range(30)]
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.animate_particles)
         self.timer.start(33)
@@ -1367,73 +1376,19 @@ class MainTabPage(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(3)
+        layout.setSpacing(4)
 
         self.btn_tele = self.create_key_row(layout, "TELEKILL", app_config.tele_hotkey, 'tele_hotkey')
         self.btn_freeze = self.create_key_row(layout, "FREEZE", app_config.freeze_hotkey, 'freeze_hotkey')
         self.btn_ghost = self.create_key_row(layout, "GHOST", app_config.ghost_hotkey, 'ghost_hotkey')
         self.btn_aimlag = self.create_key_row(layout, "AIM LAG (ARM)", app_config.aimlag_hotkey, 'aimlag_hotkey')
 
-        # Nút cài đặt tọa độ nút bắn trực tiếp trên màn hình game
-        self.calib_btn = QPushButton()
-        self.calib_btn.setFixedHeight(22)
-        self.calib_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.update_calib_btn_text()
-        self.calib_btn.clicked.connect(self.start_calibrate_fire_pos)
-        layout.addWidget(self.calib_btn)
-
-        hint_lbl = QLabel("Bật ARM: Chỉ Freeze khi bấm chuột trái trúng nút bắn")
+        layout.addSpacing(4)
+        hint_lbl = QLabel("Nhấn phím ARM: Giữ chuột trái trong game sẽ Freeze, thả ra tắt")
         hint_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint_lbl.setStyleSheet("color: #71717a; font-size: 8px; font-weight: 500; font-family: 'Segoe UI', Arial;")
+        hint_lbl.setStyleSheet("color: #71717a; font-size: 8.5px; font-weight: 500; font-family: 'Segoe UI', Arial;")
         layout.addWidget(hint_lbl)
         layout.addStretch()
-
-        signals.update_calib_ui.connect(self.update_calib_btn_text)
-
-    def update_calib_btn_text(self):
-        if app_config.fire_pos_x != -1 and app_config.fire_pos_y != -1:
-            self.calib_btn.setText(f"🎯 VỊ TRÍ NÚT BẮN: ({app_config.fire_pos_x}, {app_config.fire_pos_y})")
-            self.calib_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #0d1512;
-                    color: #00ff66;
-                    border: 1px dashed #00ff66;
-                    border-radius: 4px;
-                    font-size: 8.5px;
-                    font-weight: 700;
-                    font-family: 'Consolas', monospace;
-                }
-                QPushButton:hover { background-color: #14241d; }
-            """)
-        else:
-            self.calib_btn.setText("🎯 CÀI VỊ TRÍ NÚT BẮN (CLICK ĐỂ GÁN)")
-            self.calib_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #181214;
-                    color: #f59e0b;
-                    border: 1px dashed #f59e0b;
-                    border-radius: 4px;
-                    font-size: 8.5px;
-                    font-weight: 700;
-                    font-family: 'Consolas', monospace;
-                }
-                QPushButton:hover { background-color: #241a1d; }
-            """)
-
-    def start_calibrate_fire_pos(self):
-        net_state.calibrating_fire_pos = True
-        self.calib_btn.setText("⏳ Click vào nút bắn trên Game...")
-        self.calib_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3b1d11;
-                color: #fb923c;
-                border: 1px solid #fb923c;
-                border-radius: 4px;
-                font-size: 8.5px;
-                font-weight: 800;
-                font-family: 'Segoe UI', Arial;
-            }
-        """)
 
     def create_key_row(self, parent_layout, label_text, config_obj, config_key):
         row = QHBoxLayout()
@@ -1445,7 +1400,7 @@ class MainTabPage(QWidget):
         row.addStretch()
 
         btn = QPushButton(config_obj.key.upper())
-        btn.setFixedSize(58, 22)
+        btn.setFixedSize(58, 24)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setStyleSheet("""
             QPushButton {
@@ -1839,10 +1794,10 @@ class MainContainerWindow(QWidget):
         self.setWindowTitle(AntiBan.get_title())
         self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.resize(340, 275)
+        self.resize(340, 255)
 
         self.bg_frame = CustomParticleFrame(self)
-        self.bg_frame.setGeometry(0, 0, 340, 275)
+        self.bg_frame.setGeometry(0, 0, 340, 255)
 
         layout = QVBoxLayout(self.bg_frame)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1960,7 +1915,7 @@ if __name__ == '__main__':
 
     threading.Thread(target=hotkey_loop, daemon=True).start()
 
-    # Hook Chuột: Bắt sự kiện bấm bắn độc lập theo tọa độ nút bắn
+    # Hook Chuột: Bắt sự kiện bấm chuột trái trong game
     mouse_listener = pynput_mouse.Listener(on_click=on_mouse_click)
     mouse_listener.daemon = True
     mouse_listener.start()
