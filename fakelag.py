@@ -158,19 +158,32 @@ def find_emulator_window():
     ctypes.windll.user32.EnumWindows(WNDENUMPROC(enum_windows_callback), 0)
     return detected[0] if detected else (None, "None")
 
-def is_click_in_emulator(x, y):
+def is_emulator_in_foreground():
     fg_hwnd = ctypes.windll.user32.GetForegroundWindow()
-    if fg_hwnd:
-        pname = get_process_name_by_hwnd(fg_hwnd)
-        if any(proc in pname for proc in EMULATOR_PROCESSES):
-            return True
-    pt = POINT(int(x), int(y))
-    pt_hwnd = ctypes.windll.user32.WindowFromPoint(pt)
-    if pt_hwnd:
-        pname = get_process_name_by_hwnd(pt_hwnd)
-        if any(proc in pname for proc in EMULATOR_PROCESSES):
-            return True
-    return False
+    if not fg_hwnd:
+        return False
+    pname = get_process_name_by_hwnd(fg_hwnd)
+    return any(proc in pname for proc in EMULATOR_PROCESSES)
+
+def is_click_on_fire_button(x, y):
+    hwnd, _ = find_emulator_window()
+    if not hwnd or not ctypes.windll.user32.IsWindow(hwnd):
+        return False
+    
+    rect = RECT()
+    ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect))
+    if not (rect.left <= x <= rect.right and rect.top <= y <= rect.bottom):
+        return False
+    
+    # Nếu đã cài tọa độ nút bắn -> kiểm tra khoảng cách
+    if app_config.fire_pos_x != -1 and app_config.fire_pos_y != -1:
+        rel_x = x - rect.left
+        rel_y = y - rect.top
+        dist = ((rel_x - app_config.fire_pos_x)**2 + (rel_y - app_config.fire_pos_y)**2)**0.5
+        return dist <= app_config.fire_radius
+    
+    # Nếu chưa cài tọa độ, mặc định kiểm tra xem có đang thao tác trong giả lập không
+    return is_emulator_in_foreground()
 
 # ================= FILTERS & MULTI-THREAD NETWORK ENGINE =================
 FILTER_FREEZE = "udp and ((udp.SrcPort >= 7000 and udp.SrcPort <= 18000) or (udp.DstPort >= 7000 and udp.DstPort <= 18000))"
@@ -216,6 +229,9 @@ class AppConfig:
         self.beep_enabled = True
         self.stream_mode = False
         self.fix_dame_enabled = True
+        self.fire_pos_x = -1
+        self.fire_pos_y = -1
+        self.fire_radius = 75
 
 app_config = AppConfig()
 
@@ -233,6 +249,9 @@ def load_config():
                 app_config.beep_enabled = data.get('beep_enabled', True)
                 app_config.stream_mode = data.get('stream_mode', False)
                 app_config.fix_dame_enabled = data.get('fix_dame_enabled', True)
+                app_config.fire_pos_x = data.get('fire_pos_x', -1)
+                app_config.fire_pos_y = data.get('fire_pos_y', -1)
+                app_config.fire_radius = data.get('fire_radius', 75)
     except Exception as e:
         debug_log(f"Config load error: {e}")
 
@@ -247,7 +266,10 @@ def save_config():
             'stream_hotkey': app_config.stream_hotkey.key,
             'beep_enabled': app_config.beep_enabled,
             'stream_mode': app_config.stream_mode,
-            'fix_dame_enabled': app_config.fix_dame_enabled
+            'fix_dame_enabled': app_config.fix_dame_enabled,
+            'fire_pos_x': app_config.fire_pos_x,
+            'fire_pos_y': app_config.fire_pos_y,
+            'fire_radius': app_config.fire_radius
         }
         with open(HOTKEY_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2)
@@ -275,6 +297,7 @@ class AppSignals(QObject):
     toggle_visibility = pyqtSignal()
     start_tracking = pyqtSignal()
     key_expired = pyqtSignal()
+    update_calib_ui = pyqtSignal()
 
 signals = AppSignals()
 
@@ -287,6 +310,7 @@ class NetState:
         self.aimlag_armed = False
         self.aimlag_mode = False
         self.mouse_held = False
+        self.calibrating_fire_pos = False
         
         self.R_I = False
         self.R_G = False
@@ -468,18 +492,34 @@ def toggle_aimlag_arm():
     (audio.play_on if active else audio.play_off)()
     signals.notify.emit('AimLag', active)
 
-# ================= MOUSE HOOK: BẮT NÚT BẮN TRONG GAME =================
+# ================= MOUSE HOOK: BẮT ĐÚNG NÚT BẮN TRONG GAME =================
 def on_mouse_click(x, y, button, pressed):
     if not net_state.is_authenticated or not net_state.is_injected:
         return
+
+    # Chế độ cài đặt vị trí nút bắn bằng thao tác click chuột
+    if net_state.calibrating_fire_pos and pressed and button == pynput_mouse.Button.left:
+        hwnd, _ = find_emulator_window()
+        if hwnd:
+            rect = RECT()
+            ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect))
+            if rect.left <= x <= rect.right and rect.top <= y <= rect.bottom:
+                app_config.fire_pos_x = int(x - rect.left)
+                app_config.fire_pos_y = int(y - rect.top)
+                save_config()
+                net_state.calibrating_fire_pos = False
+                audio.play_on()
+                signals.update_calib_ui.emit()
+                return
+
     if button == pynput_mouse.Button.left:
         with net_state.lock:
             if not net_state.aimlag_armed:
                 return
 
             if pressed:
-                # Kiểm tra click chuột trong phạm vi cửa sổ Game/Giả lập
-                if is_click_in_emulator(x, y) and not net_state.mouse_held:
+                # Chỉ khi click trúng phạm vi nút bắn trong game
+                if is_click_on_fire_button(x, y) and not net_state.mouse_held:
                     net_state.mouse_held = True
                     net_state.aimlag_mode = True
                     net_state.R_A = True
@@ -491,7 +531,7 @@ def on_mouse_click(x, y, button, pressed):
                     ).start()
                     audio.play_on()
             else:
-                # Nhả nút bắn -> Tắt Freeze và xả gói tin tức thì
+                # Nhả nút bắn -> Tắt Freeze và xả toàn bộ gói tin để gây dame tức thì
                 if net_state.mouse_held:
                     net_state.mouse_held = False
                     net_state.aimlag_mode = False
@@ -510,6 +550,7 @@ def stop_all_features():
         net_state.aimlag_mode = False
         net_state.aimlag_armed = False
         net_state.mouse_held = False
+        net_state.calibrating_fire_pos = False
         net_state.R_I = net_state.R_G = net_state.R_T = net_state.R_A = False
         
         pt = list(net_state.packet_tele)
@@ -720,7 +761,7 @@ class Particle:
 class CustomParticleFrame(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.particles = [Particle(340, 255) for _ in range(30)]
+        self.particles = [Particle(340, 275) for _ in range(30)]
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.animate_particles)
         self.timer.start(33)
@@ -1326,19 +1367,73 @@ class MainTabPage(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(4)
+        layout.setSpacing(3)
 
         self.btn_tele = self.create_key_row(layout, "TELEKILL", app_config.tele_hotkey, 'tele_hotkey')
         self.btn_freeze = self.create_key_row(layout, "FREEZE", app_config.freeze_hotkey, 'freeze_hotkey')
         self.btn_ghost = self.create_key_row(layout, "GHOST", app_config.ghost_hotkey, 'ghost_hotkey')
         self.btn_aimlag = self.create_key_row(layout, "AIM LAG (ARM)", app_config.aimlag_hotkey, 'aimlag_hotkey')
 
-        layout.addSpacing(2)
-        hint_lbl = QLabel("Aim Lag: Nhấn ARM, chỉ Freeze khi bấm chuột trái TRONG GAME")
+        # Nút cài đặt tọa độ nút bắn trực tiếp trên màn hình game
+        self.calib_btn = QPushButton()
+        self.calib_btn.setFixedHeight(22)
+        self.calib_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.update_calib_btn_text()
+        self.calib_btn.clicked.connect(self.start_calibrate_fire_pos)
+        layout.addWidget(self.calib_btn)
+
+        hint_lbl = QLabel("Bật ARM: Chỉ Freeze khi bấm chuột trái trúng nút bắn")
         hint_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint_lbl.setStyleSheet("color: #71717a; font-size: 8.5px; font-weight: 500; font-family: 'Segoe UI', Arial;")
+        hint_lbl.setStyleSheet("color: #71717a; font-size: 8px; font-weight: 500; font-family: 'Segoe UI', Arial;")
         layout.addWidget(hint_lbl)
         layout.addStretch()
+
+        signals.update_calib_ui.connect(self.update_calib_btn_text)
+
+    def update_calib_btn_text(self):
+        if app_config.fire_pos_x != -1 and app_config.fire_pos_y != -1:
+            self.calib_btn.setText(f"🎯 VỊ TRÍ NÚT BẮN: ({app_config.fire_pos_x}, {app_config.fire_pos_y})")
+            self.calib_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #0d1512;
+                    color: #00ff66;
+                    border: 1px dashed #00ff66;
+                    border-radius: 4px;
+                    font-size: 8.5px;
+                    font-weight: 700;
+                    font-family: 'Consolas', monospace;
+                }
+                QPushButton:hover { background-color: #14241d; }
+            """)
+        else:
+            self.calib_btn.setText("🎯 CÀI VỊ TRÍ NÚT BẮN (CLICK ĐỂ GÁN)")
+            self.calib_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #181214;
+                    color: #f59e0b;
+                    border: 1px dashed #f59e0b;
+                    border-radius: 4px;
+                    font-size: 8.5px;
+                    font-weight: 700;
+                    font-family: 'Consolas', monospace;
+                }
+                QPushButton:hover { background-color: #241a1d; }
+            """)
+
+    def start_calibrate_fire_pos(self):
+        net_state.calibrating_fire_pos = True
+        self.calib_btn.setText("⏳ Click vào nút bắn trên Game...")
+        self.calib_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3b1d11;
+                color: #fb923c;
+                border: 1px solid #fb923c;
+                border-radius: 4px;
+                font-size: 8.5px;
+                font-weight: 800;
+                font-family: 'Segoe UI', Arial;
+            }
+        """)
 
     def create_key_row(self, parent_layout, label_text, config_obj, config_key):
         row = QHBoxLayout()
@@ -1350,7 +1445,7 @@ class MainTabPage(QWidget):
         row.addStretch()
 
         btn = QPushButton(config_obj.key.upper())
-        btn.setFixedSize(58, 24)
+        btn.setFixedSize(58, 22)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setStyleSheet("""
             QPushButton {
@@ -1744,10 +1839,10 @@ class MainContainerWindow(QWidget):
         self.setWindowTitle(AntiBan.get_title())
         self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.resize(340, 255)
+        self.resize(340, 275)
 
         self.bg_frame = CustomParticleFrame(self)
-        self.bg_frame.setGeometry(0, 0, 340, 255)
+        self.bg_frame.setGeometry(0, 0, 340, 275)
 
         layout = QVBoxLayout(self.bg_frame)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1865,7 +1960,7 @@ if __name__ == '__main__':
 
     threading.Thread(target=hotkey_loop, daemon=True).start()
 
-    # Hook Chuột: Bắt sự kiện bắn chỉ khi click vào Game
+    # Hook Chuột: Bắt sự kiện bấm bắn độc lập theo tọa độ nút bắn
     mouse_listener = pynput_mouse.Listener(on_click=on_mouse_click)
     mouse_listener.daemon = True
     mouse_listener.start()
