@@ -98,7 +98,6 @@ def verify_key_with_vps(key_str):
         valid = res_data.get("valid", False) or res_data.get("success", False)
         msg = res_data.get("msg", "Lỗi xác thực")
         
-        # Triệt tiêu sai lệch múi giờ giữa VPS và máy client
         if "remaining_seconds" in res_data:
             rem = float(res_data["remaining_seconds"])
             expires_at = -1.0 if rem == -1 else (time.time() + rem)
@@ -173,15 +172,15 @@ def is_emulator_in_foreground():
     pname = get_process_name_by_hwnd(fg_hwnd)
     return any(proc in pname for proc in EMULATOR_PROCESSES)
 
-# ================= FILTERS & NETWORK ENGINE =================
+# ================= NETWORK FILTERS =================
 FILTER_FREEZE_FIX = "udp and ((udp.SrcPort >= 7000 and udp.SrcPort <= 18000) or (udp.DstPort >= 7000 and udp.DstPort <= 18000))"
 FILTER_I          = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
 FILTER_F          = "(udp.PayloadLength >= 53 and udp.PayloadLength <= 170) and (udp.DstPort >= 10011 and udp.DstPort <= 10020)"
 FILTER_O          = "udp.DstPort >= 10010 and udp.DstPort <= 10020 and udp.PayloadLength >= 35"
 FILTER_AIMLAG     = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
 
-MAX_PACKETS = 100
-MAX_AIMLAG_PACKETS = 35
+MAX_PACKETS = 80
+MAX_AIMLAG_PACKETS = 30
 FREEZE_AUTO_DISABLE_SEC = 1.5
 
 HOTKEY_FILE = 'zerox_hotkey.json'
@@ -307,22 +306,7 @@ class NetState:
         self.ghost_mode = False
         
         self.aimlag_armed = False
-        self.aimlag_blocking = False
         self.mouse_held = False
-
-        self.R_I = False
-        self.W_I = None
-        self.R_G = False
-        self.W_G = None
-        self.R_T = False
-        self.W_T = None
-        self.R_A = False
-        self.W_A = None
-
-        self.packet_freeze = []
-        self.packet_ghost = []
-        self.packet_tele = []
-        self.packet_aimlag = []
 
         self.running = True
         self.is_authenticated = False
@@ -334,64 +318,86 @@ class NetState:
 
 net_state = NetState()
 
-# ================= LUỒNG MẠNG CHUẨN =================
-def send_packets(lst, f):
-    if not lst: return
-    try:
-        with pydivert.WinDivert(f, layer=pydivert.Layer.NETWORK) as s:
-            for pkt in lst:
-                s.send(pydivert.Packet(pkt.raw, pkt.interface, pkt.direction))
-    except Exception as e:
-        debug_log(f"send_packets error: {e}")
+# ================= BỘ ĐIỀU PHỐI MẠNG TỰ GIẢI PHÓNG LUỒNG (ZERO LEAK ENGINE) =================
+class DivertSession:
+    def __init__(self, filter_str, max_packets=MAX_PACKETS):
+        self.filter_str = filter_str
+        self.max_packets = max_packets
+        self.handle = None
+        self.is_active = False
+        self.packets = []
+        self.lock = threading.Lock()
 
-def send_burst_packets(packets, filter_str, burst_size=15, delay_per_pkt=0, delay_between_burst=0):
-    if not packets: return
-    try:
-        with pydivert.WinDivert(filter_str, layer=pydivert.Layer.NETWORK) as sender:
-            total = len(packets)
-            for i in range(0, total, burst_size):
-                burst = packets[i:i+burst_size]
-                for pkt in burst:
-                    sender.send(pydivert.Packet(pkt.raw, pkt.interface, pkt.direction))
-                    if delay_per_pkt > 0:
-                        time.sleep(delay_per_pkt)
-                if i + burst_size < total and delay_between_burst > 0:
-                    time.sleep(delay_between_burst)
-    except Exception as e:
-        debug_log(f"send_burst_packets error: {e}")
-
-def divert_shinmod(filter_str, flag_ref, packet_list, cond_ref, max_limit=MAX_PACKETS):
-    h = None
-    while net_state.running and net_state.is_authenticated and net_state.is_injected:
-        if not flag_ref():
-            if h:
-                try: h.close()
-                except Exception: pass
-            h = None
-            time.sleep(0.01)
-            continue
-        if h is None:
+    def start(self):
+        with self.lock:
+            if self.is_active:
+                return
+            self.is_active = True
+            self.packets.clear()
             try:
-                h = pydivert.WinDivert(filter_str)
-                h.open()
+                self.handle = pydivert.WinDivert(self.filter_str, layer=pydivert.Layer.NETWORK)
+                self.handle.open()
             except Exception as e:
-                debug_log(f"Divert open error on {filter_str}: {e}")
-                time.sleep(0.02)
-                continue
+                debug_log(f"Session open error on {self.filter_str}: {e}")
+                self.is_active = False
+                self.handle = None
+                return
+            threading.Thread(target=self._worker, daemon=True).start()
+
+    def _worker(self):
+        h = self.handle
+        if not h: return
         try:
             for pkt in h:
-                if not net_state.running or not flag_ref():
+                if not self.is_active or not net_state.running:
                     break
-                with net_state.lock:
-                    if cond_ref() and len(packet_list) >= max_limit:
-                        packet_list.pop(0)
-                    packet_list.append(pydivert.Packet(pkt.raw, pkt.interface, pkt.direction))
+                with self.lock:
+                    if len(self.packets) >= self.max_packets:
+                        self.packets.pop(0)
+                    self.packets.append(pydivert.Packet(pkt.raw, pkt.interface, pkt.direction))
         except Exception:
             pass
-        time.sleep(0.01)
-    if h:
-        try: h.close()
-        except Exception: pass
+        finally:
+            try:
+                if h: h.close()
+            except Exception:
+                pass
+
+    def stop_and_flush(self):
+        with self.lock:
+            if not self.is_active and not self.packets:
+                return
+            self.is_active = False
+            if self.handle:
+                try:
+                    self.handle.close()
+                except Exception:
+                    pass
+                self.handle = None
+            
+            pkts_to_send = list(self.packets)
+            self.packets.clear()
+
+        if pkts_to_send:
+            threading.Thread(target=self._flush_worker, args=(pkts_to_send, self.filter_str), daemon=True).start()
+
+    @staticmethod
+    def _flush_worker(packets, filter_str):
+        if not packets: return
+        try:
+            with pydivert.WinDivert(filter_str, layer=pydivert.Layer.NETWORK) as sender:
+                for pkt in packets:
+                    try:
+                        sender.send(pydivert.Packet(pkt.raw, pkt.interface, pkt.direction))
+                    except Exception:
+                        pass
+        except Exception as e:
+            debug_log(f"Flush error: {e}")
+
+aimlag_session = DivertSession(FILTER_AIMLAG, max_packets=MAX_AIMLAG_PACKETS)
+tele_session = DivertSession(FILTER_O, max_packets=MAX_PACKETS)
+ghost_session = DivertSession(FILTER_F, max_packets=MAX_PACKETS)
+freeze_shinmod_session = DivertSession(FILTER_I, max_packets=MAX_PACKETS)
 
 # ================= LUỒNG MẠNG FIX DAME CHO FREEZE =================
 def divert_freeze_fix_dame_worker():
@@ -435,33 +441,15 @@ def toggle_freeze():
     with net_state.lock:
         if net_state.freeze_mode:
             net_state.freeze_mode = False
-            net_state.R_I = False
             net_state.freeze_active_time = 0.0
-            if net_state.W_I:
-                try: net_state.W_I.close()
-                except Exception: pass
-                net_state.W_I = None
-            
             if not app_config.fix_dame_enabled:
-                p = list(net_state.packet_freeze)
-                net_state.packet_freeze.clear()
-                if p:
-                    threading.Thread(target=send_packets, args=(p, FILTER_I), daemon=True).start()
+                freeze_shinmod_session.stop_and_flush()
             active = False
         else:
             net_state.freeze_mode = True
             net_state.freeze_active_time = time.time()
-            
             if not app_config.fix_dame_enabled:
-                net_state.R_I = True
-                net_state.W_I = pydivert.WinDivert(FILTER_I, layer=pydivert.Layer.NETWORK)
-                try: net_state.W_I.open()
-                except Exception: pass
-                threading.Thread(
-                    target=divert_shinmod,
-                    args=(FILTER_I, lambda: net_state.R_I, net_state.packet_freeze, lambda: net_state.freeze_mode),
-                    daemon=True,
-                ).start()
+                freeze_shinmod_session.start()
             active = True
 
     audio.play_freeze(active)
@@ -472,27 +460,11 @@ def toggle_ghost():
     with net_state.lock:
         if net_state.ghost_mode:
             net_state.ghost_mode = False
-            net_state.R_G = False
-            if net_state.W_G:
-                try: net_state.W_G.close()
-                except Exception: pass
-                net_state.W_G = None
-            p = list(net_state.packet_ghost)
-            net_state.packet_ghost.clear()
-            if p:
-                threading.Thread(target=send_packets, args=(p, FILTER_F), daemon=True).start()
+            ghost_session.stop_and_flush()
             active = False
         else:
             net_state.ghost_mode = True
-            net_state.R_G = True
-            net_state.W_G = pydivert.WinDivert(FILTER_F, layer=pydivert.Layer.NETWORK)
-            try: net_state.W_G.open()
-            except Exception: pass
-            threading.Thread(
-                target=divert_shinmod,
-                args=(FILTER_F, lambda: net_state.R_G, net_state.packet_ghost, lambda: net_state.ghost_mode),
-                daemon=True,
-            ).start()
+            ghost_session.start()
             active = True
 
     audio.play_ghost(active)
@@ -503,27 +475,11 @@ def toggle_tele():
     with net_state.lock:
         if net_state.tele_mode:
             net_state.tele_mode = False
-            net_state.R_T = False
-            if net_state.W_T:
-                try: net_state.W_T.close()
-                except Exception: pass
-                net_state.W_T = None
-            p = list(net_state.packet_tele)
-            net_state.packet_tele.clear()
-            if p:
-                threading.Thread(target=lambda: send_burst_packets(p, FILTER_O, 15, 0, 0), daemon=True).start()
+            tele_session.stop_and_flush()
             active = False
         else:
             net_state.tele_mode = True
-            net_state.R_T = True
-            net_state.W_T = pydivert.WinDivert(FILTER_O, layer=pydivert.Layer.NETWORK)
-            try: net_state.W_T.open()
-            except Exception: pass
-            threading.Thread(
-                target=divert_shinmod,
-                args=(FILTER_O, lambda: net_state.R_T, net_state.packet_tele, lambda: net_state.tele_mode),
-                daemon=True,
-            ).start()
+            tele_session.start()
             active = True
 
     audio.play_tele(active)
@@ -535,22 +491,13 @@ def toggle_aimlag_arm():
         net_state.aimlag_armed = not net_state.aimlag_armed
         active = net_state.aimlag_armed
         if not active:
-            net_state.aimlag_blocking = False
             net_state.mouse_held = False
-            net_state.R_A = False
-            if net_state.W_A:
-                try: net_state.W_A.close()
-                except Exception: pass
-                net_state.W_A = None
-            p = list(net_state.packet_aimlag)
-            net_state.packet_aimlag.clear()
-            if p:
-                threading.Thread(target=lambda: send_burst_packets(p, FILTER_AIMLAG, 15, 0, 0), daemon=True).start()
+            aimlag_session.stop_and_flush()
 
     audio.play_aimlag(active)
     signals.notify.emit('AimLag', active)
 
-# ================= HOOK CHUỘT AIM LAG ĐÃ TỐI ƯU =================
+# ================= HOOK CHUỘT AIM LAG KHÔNG DELAY =================
 def on_mouse_click(x, y, button, pressed):
     if not net_state.is_authenticated or not net_state.is_injected:
         return
@@ -563,30 +510,11 @@ def on_mouse_click(x, y, button, pressed):
             if pressed:
                 if is_emulator_in_foreground() and not net_state.mouse_held:
                     net_state.mouse_held = True
-                    net_state.aimlag_blocking = True
-                    net_state.R_A = True
-                    net_state.packet_aimlag.clear()
-                    net_state.W_A = pydivert.WinDivert(FILTER_AIMLAG, layer=pydivert.Layer.NETWORK)
-                    try: net_state.W_A.open()
-                    except Exception: pass
-                    threading.Thread(
-                        target=divert_shinmod,
-                        args=(FILTER_AIMLAG, lambda: net_state.R_A, net_state.packet_aimlag, lambda: net_state.aimlag_blocking, MAX_AIMLAG_PACKETS),
-                        daemon=True,
-                    ).start()
+                    aimlag_session.start()
             else:
                 if net_state.mouse_held:
                     net_state.mouse_held = False
-                    net_state.aimlag_blocking = False
-                    net_state.R_A = False
-                    if net_state.W_A:
-                        try: net_state.W_A.close()
-                        except Exception: pass
-                        net_state.W_A = None
-                    p = list(net_state.packet_aimlag)
-                    net_state.packet_aimlag.clear()
-                    if p:
-                        threading.Thread(target=lambda: send_burst_packets(p, FILTER_AIMLAG, 15, 0, 0), daemon=True).start()
+                    aimlag_session.stop_and_flush()
 
 def stop_all_features():
     with net_state.lock:
@@ -594,41 +522,12 @@ def stop_all_features():
         net_state.freeze_mode = False
         net_state.ghost_mode = False
         net_state.aimlag_armed = False
-        net_state.aimlag_blocking = False
         net_state.mouse_held = False
-        net_state.R_I = net_state.R_G = net_state.R_T = net_state.R_A = False
-        
-        if net_state.W_I:
-            try: net_state.W_I.close()
-            except Exception: pass
-            net_state.W_I = None
-        if net_state.W_G:
-            try: net_state.W_G.close()
-            except Exception: pass
-            net_state.W_G = None
-        if net_state.W_T:
-            try: net_state.W_T.close()
-            except Exception: pass
-            net_state.W_T = None
-        if net_state.W_A:
-            try: net_state.W_A.close()
-            except Exception: pass
-            net_state.W_A = None
 
-        pt = list(net_state.packet_tele)
-        pf = list(net_state.packet_freeze)
-        pg = list(net_state.packet_ghost)
-        pa = list(net_state.packet_aimlag)
-        
-        net_state.packet_tele.clear()
-        net_state.packet_freeze.clear()
-        net_state.packet_ghost.clear()
-        net_state.packet_aimlag.clear()
-
-    if pt: threading.Thread(target=lambda: send_burst_packets(pt, FILTER_O, 15, 0, 0), daemon=True).start()
-    if pf and not app_config.fix_dame_enabled: threading.Thread(target=send_packets, args=(pf, FILTER_I), daemon=True).start()
-    if pg: threading.Thread(target=send_packets, args=(pg, FILTER_F), daemon=True).start()
-    if pa: threading.Thread(target=lambda: send_burst_packets(pa, FILTER_AIMLAG, 15, 0, 0), daemon=True).start()
+    aimlag_session.stop_and_flush()
+    tele_session.stop_and_flush()
+    ghost_session.stop_and_flush()
+    freeze_shinmod_session.stop_and_flush()
 
     signals.notify.emit('Freeze', False)
     signals.notify.emit('Telekill', False)
@@ -685,7 +584,7 @@ def hotkey_loop():
 
 # ================= UI WIDGETS & COMPONENTS =================
 class SlidingStackedWidget(QStackedWidget):
-    def __init__(self, parent=None):
+    def __init__(parent=None, self=None):
         super().__init__(parent)
         self._is_animating = False
         self._anim_group = None
@@ -910,7 +809,7 @@ class InitialGuiWidget(QWidget):
         layout.setContentsMargins(14, 8, 14, 14)
         layout.setSpacing(10)
 
-        layout.addWidget(TopBar("GUI 1.0.3", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
+        layout.addWidget(TopBar("GUI 1.0.4", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
         layout.addSpacing(15)
 
         status_lbl = QLabel("Enable Inject Connect")
@@ -1884,7 +1783,6 @@ class MainContainerWindow(QWidget):
 
         self.stack.setCurrentIndex(0)
 
-        # Quét đồng bộ thời gian thực từ Server VPS mỗi 3.5 giây
         self.sync_key_timer = QTimer(self)
         self.sync_key_timer.timeout.connect(self.sync_key_with_server)
 
