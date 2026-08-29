@@ -40,7 +40,7 @@ except ImportError:
 try:
     from PyQt6.QtWidgets import (
         QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-        QPushButton, QFrame, QStackedWidget, QLineEdit
+        QPushButton, QFrame, QStackedWidget, QLineEdit, QGridLayout
     )
     from PyQt6.QtCore import Qt, pyqtSignal, QObject, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup
     from PyQt6.QtGui import QColor, QPainter, QBrush, QPen, QFont, QLinearGradient, QRadialGradient
@@ -48,7 +48,7 @@ except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "PyQt6"])
     from PyQt6.QtWidgets import (
         QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-        QPushButton, QFrame, QStackedWidget, QLineEdit
+        QPushButton, QFrame, QStackedWidget, QLineEdit, QGridLayout
     )
     from PyQt6.QtCore import Qt, pyqtSignal, QObject, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup
     from PyQt6.QtGui import QColor, QPainter, QBrush, QPen, QFont, QLinearGradient, QRadialGradient
@@ -165,14 +165,14 @@ def is_emulator_in_foreground():
     pname = get_process_name_by_hwnd(fg_hwnd)
     return any(proc in pname for proc in EMULATOR_PROCESSES)
 
-# ================= FILTERS CHUẨN TỪ SHINMOD =================
+# ================= FILTERS CHUẨN SHINMOD =================
 FILTER_FREEZE = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
 FILTER_F      = "(udp.PayloadLength >= 53 and udp.PayloadLength <= 170) and (udp.DstPort >= 10011 and udp.DstPort <= 10020)"
 FILTER_I      = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
 FILTER_O      = "udp.DstPort >= 10010 and udp.DstPort <= 10020 and udp.PayloadLength >= 35"
 FILTER_AIMLAG = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
 
-MAX_PACKETS = 100
+MAX_PACKETS = 80
 
 FREEZE_AUTO_DISABLE_SEC = 1.5
 TELE_AUTO_DISABLE_SEC = 2.0
@@ -206,7 +206,13 @@ class AppConfig:
         self.aimlag_hotkey = HotkeyConfig(key='c')
         self.hide_hotkey = HotkeyConfig(key='f7')
         self.stream_hotkey = HotkeyConfig(key='f8')
-        self.beep_enabled = True
+        
+        # Tùy chỉnh Beep độc lập cho từng chức năng
+        self.beep_tele = True
+        self.beep_freeze = True
+        self.beep_ghost = True
+        self.beep_aimlag = True
+        
         self.stream_mode = False
         self.fix_dame_enabled = True
 
@@ -223,7 +229,12 @@ def load_config():
                 app_config.aimlag_hotkey.key = data.get('aimlag_hotkey', 'c')
                 app_config.hide_hotkey.key = data.get('hide_hotkey', 'f7')
                 app_config.stream_hotkey.key = data.get('stream_hotkey', 'f8')
-                app_config.beep_enabled = data.get('beep_enabled', True)
+                
+                app_config.beep_tele = data.get('beep_tele', True)
+                app_config.beep_freeze = data.get('beep_freeze', True)
+                app_config.beep_ghost = data.get('beep_ghost', True)
+                app_config.beep_aimlag = data.get('beep_aimlag', True)
+                
                 app_config.stream_mode = data.get('stream_mode', False)
                 app_config.fix_dame_enabled = data.get('fix_dame_enabled', True)
     except Exception as e:
@@ -238,7 +249,10 @@ def save_config():
             'aimlag_hotkey': app_config.aimlag_hotkey.key,
             'hide_hotkey': app_config.hide_hotkey.key,
             'stream_hotkey': app_config.stream_hotkey.key,
-            'beep_enabled': app_config.beep_enabled,
+            'beep_tele': app_config.beep_tele,
+            'beep_freeze': app_config.beep_freeze,
+            'beep_ghost': app_config.beep_ghost,
+            'beep_aimlag': app_config.beep_aimlag,
             'stream_mode': app_config.stream_mode,
             'fix_dame_enabled': app_config.fix_dame_enabled
         }
@@ -252,12 +266,25 @@ load_config()
 # ================= AUDIO =================
 class AudioManager:
     def beep(self, freq, dur):
-        if not app_config.beep_enabled or app_config.stream_mode:
+        if app_config.stream_mode:
             return
         threading.Thread(target=lambda: winsound.Beep(freq, dur), daemon=True).start()
 
-    def play_on(self): self.beep(950, 80)
-    def play_off(self): self.beep(420, 100)
+    def play_tele(self, active):
+        if app_config.beep_tele:
+            self.beep(950 if active else 420, 75)
+
+    def play_freeze(self, active):
+        if app_config.beep_freeze:
+            self.beep(900 if active else 400, 75)
+
+    def play_ghost(self, active):
+        if app_config.beep_ghost:
+            self.beep(1000 if active else 450, 75)
+
+    def play_aimlag(self, active):
+        if app_config.beep_aimlag:
+            self.beep(850 if active else 380, 60)
 
 audio = AudioManager()
 
@@ -343,7 +370,7 @@ def divert(filter_str, flag_ref, packet_list, cond_ref):
                 try: h.close()
                 except Exception: pass
             h = None
-            time.sleep(0.05)
+            time.sleep(0.02)
             continue
         if h is None:
             try:
@@ -351,7 +378,7 @@ def divert(filter_str, flag_ref, packet_list, cond_ref):
                 h.open()
             except Exception as e:
                 debug_log(f"Divert open error on {filter_str}: {e}")
-                time.sleep(0.1)
+                time.sleep(0.05)
                 continue
         try:
             for pkt in h:
@@ -363,7 +390,7 @@ def divert(filter_str, flag_ref, packet_list, cond_ref):
                     packet_list.append(pydivert.Packet(pkt.raw, pkt.interface, pkt.direction))
         except Exception:
             pass
-        time.sleep(0.05)
+        time.sleep(0.02)
     if h:
         try: h.close()
         except Exception: pass
@@ -399,7 +426,7 @@ def toggle_freeze():
             ).start()
             active = True
 
-    (audio.play_on if active else audio.play_off)()
+    audio.play_freeze(active)
     signals.notify.emit('Freeze', active)
 
 def toggle_ghost():
@@ -432,7 +459,7 @@ def toggle_ghost():
             ).start()
             active = True
 
-    (audio.play_on if active else audio.play_off)()
+    audio.play_ghost(active)
     signals.notify.emit('Ghost', active)
 
 def toggle_tele():
@@ -452,7 +479,6 @@ def toggle_tele():
                 if app_config.fix_dame_enabled:
                     threading.Thread(target=send_packets, args=(p, FILTER_O), daemon=True).start()
                 else:
-                    # Chế độ Không Fix Dame sử dụng burst thread xả dồn dập
                     threading.Thread(target=lambda: send_burst_packets(p, FILTER_O, 10, 0, 0), daemon=True).start()
             active = False
         else:
@@ -469,7 +495,7 @@ def toggle_tele():
             ).start()
             active = True
 
-    (audio.play_on if active else audio.play_off)()
+    audio.play_tele(active)
     signals.notify.emit('Telekill', active)
 
 def toggle_aimlag_arm():
@@ -477,7 +503,19 @@ def toggle_aimlag_arm():
     with net_state.lock:
         net_state.aimlag_armed = not net_state.aimlag_armed
         active = net_state.aimlag_armed
-        if not active:
+        if active:
+            # Khởi tạo trước luồng thu nhận WinDivert để khi click chuột không bị delay
+            net_state.R_A = False
+            net_state.packet_aimlag.clear()
+            net_state.W_A = pydivert.WinDivert(FILTER_AIMLAG, layer=pydivert.Layer.NETWORK)
+            try: net_state.W_A.open()
+            except Exception: pass
+            threading.Thread(
+                target=divert,
+                args=(FILTER_AIMLAG, lambda: (net_state.aimlag_armed and net_state.R_A), net_state.packet_aimlag, lambda: net_state.aimlag_mode),
+                daemon=True,
+            ).start()
+        else:
             net_state.aimlag_mode = False
             net_state.R_A = False
             net_state.mouse_held = False
@@ -490,10 +528,10 @@ def toggle_aimlag_arm():
             if p:
                 threading.Thread(target=send_packets, args=(p, FILTER_AIMLAG), daemon=True).start()
 
-    (audio.play_on if active else audio.play_off)()
+    audio.play_aimlag(active)
     signals.notify.emit('AimLag', active)
 
-# ================= HOOK CHUỘT: NHẤN LÀ FREEZE - THẢ LÀ HỒI MẠNG =================
+# ================= HOOK CHUỘT: TỐI ƯU KHÔNG DELAY =================
 def on_mouse_click(x, y, button, pressed):
     if not net_state.is_authenticated or not net_state.is_injected:
         return
@@ -504,36 +542,22 @@ def on_mouse_click(x, y, button, pressed):
                 return
 
             if pressed:
-                # Chỉ freeze khi nhấn chuột trong cửa sổ game
+                # Bấm giữ chuột trái trong game -> Chặn gói tin ngay lập tức
                 if is_emulator_in_foreground() and not net_state.mouse_held:
                     net_state.mouse_held = True
                     net_state.aimlag_mode = True
                     net_state.R_A = True
                     net_state.packet_aimlag.clear()
-                    net_state.W_A = pydivert.WinDivert(FILTER_AIMLAG, layer=pydivert.Layer.NETWORK)
-                    try: net_state.W_A.open()
-                    except Exception: pass
-                    threading.Thread(
-                        target=divert,
-                        args=(FILTER_AIMLAG, lambda: net_state.R_A, net_state.packet_aimlag, lambda: net_state.aimlag_mode),
-                        daemon=True,
-                    ).start()
-                    audio.play_on()
             else:
-                # Nhả chuột -> Tắt Freeze và xả toàn bộ gói tin tức thì
+                # Nhả chuột -> Xả tức thì danh sách gói tin, mạng thông suốt ngay
                 if net_state.mouse_held:
                     net_state.mouse_held = False
                     net_state.aimlag_mode = False
                     net_state.R_A = False
-                    if net_state.W_A:
-                        try: net_state.W_A.close()
-                        except Exception: pass
-                        net_state.W_A = None
                     p = list(net_state.packet_aimlag)
                     net_state.packet_aimlag.clear()
                     if p:
                         threading.Thread(target=send_packets, args=(p, FILTER_AIMLAG), daemon=True).start()
-                    audio.play_off()
 
 def stop_all_features():
     with net_state.lock:
@@ -868,7 +892,7 @@ class InitialGuiWidget(QWidget):
         layout.setContentsMargins(14, 8, 14, 14)
         layout.setSpacing(10)
 
-        layout.addWidget(TopBar("GUI 1.0.1", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
+        layout.addWidget(TopBar("GUI 1.0.3", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
         layout.addSpacing(15)
 
         status_lbl = QLabel("Enable Inject Connect")
@@ -1384,7 +1408,7 @@ class MainTabPage(QWidget):
         self.btn_aimlag = self.create_key_row(layout, "AIM LAG (ARM)", app_config.aimlag_hotkey, 'aimlag_hotkey')
 
         layout.addSpacing(4)
-        hint_lbl = QLabel("Nhấn phím ARM: Giữ chuột trái trong game sẽ Freeze, thả ra tắt")
+        hint_lbl = QLabel("Bật ARM: Nhấn chuột trái trong game sẽ Freeze, thả ra tắt")
         hint_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint_lbl.setStyleSheet("color: #71717a; font-size: 8.5px; font-weight: 500; font-family: 'Segoe UI', Arial;")
         layout.addWidget(hint_lbl)
@@ -1439,69 +1463,89 @@ class SettingTabPage(QWidget):
         self.parent_widget = parent_widget
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 2)
-        layout.setSpacing(6)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(4)
 
-        self.sound_btn = QPushButton("Sound: ON" if app_config.beep_enabled else "Sound: OFF")
-        self.sound_btn.setFixedHeight(30)
-        self.sound_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.sound_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #0e1117;
-                color: #e4e4e7;
-                border: 1px solid #27272a;
-                border-radius: 6px;
-                font-size: 11px;
-                font-weight: 700;
-                font-family: 'Segoe UI', Arial;
-            }
-            QPushButton:hover {
-                background-color: #141821;
-                border-color: #3f3f46;
-                color: #ffffff;
-            }
-        """)
-        self.sound_btn.clicked.connect(self.toggle_sound)
-        layout.addWidget(self.sound_btn)
+        # Lưới chứa 4 nút Beep riêng biệt
+        grid = QGridLayout()
+        grid.setSpacing(4)
 
+        self.btn_beep_tele = QPushButton()
+        self.btn_beep_freeze = QPushButton()
+        self.btn_beep_ghost = QPushButton()
+        self.btn_beep_aimlag = QPushButton()
+
+        self.btn_beep_tele.setFixedHeight(26)
+        self.btn_beep_freeze.setFixedHeight(26)
+        self.btn_beep_ghost.setFixedHeight(26)
+        self.btn_beep_aimlag.setFixedHeight(26)
+
+        self.btn_beep_tele.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_beep_freeze.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_beep_ghost.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_beep_aimlag.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        self.btn_beep_tele.clicked.connect(lambda: self.toggle_beep('tele'))
+        self.btn_beep_freeze.clicked.connect(lambda: self.toggle_beep('freeze'))
+        self.btn_beep_ghost.clicked.connect(lambda: self.toggle_beep('ghost'))
+        self.btn_beep_aimlag.clicked.connect(lambda: self.toggle_beep('aimlag'))
+
+        grid.addWidget(self.btn_beep_tele, 0, 0)
+        grid.addWidget(self.btn_beep_freeze, 0, 1)
+        grid.addWidget(self.btn_beep_ghost, 1, 0)
+        grid.addWidget(self.btn_beep_aimlag, 1, 1)
+
+        layout.addLayout(grid)
+
+        # Nút bật/tắt Fix Dame
         self.fix_dame_btn = QPushButton()
-        self.fix_dame_btn.setFixedHeight(30)
+        self.fix_dame_btn.setFixedHeight(26)
         self.fix_dame_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.update_fix_btn_display()
         self.fix_dame_btn.clicked.connect(self.toggle_fix_dame)
         layout.addWidget(self.fix_dame_btn)
 
+        self.update_all_buttons()
         layout.addStretch()
 
-    def update_fix_btn_display(self):
-        text = "Fix Dame: ON" if app_config.fix_dame_enabled else "Fix Dame: OFF"
-        self.fix_dame_btn.setText(text)
-        self.fix_dame_btn.setStyleSheet("""
-            QPushButton {
+    def update_btn_style(self, btn, text, enabled):
+        btn.setText(f"{text}: {'ON' if enabled else 'OFF'}")
+        color = "#00ff66" if enabled else "#9ca3af"
+        btn.setStyleSheet(f"""
+            QPushButton {{
                 background-color: #0e1117;
-                color: #e4e4e7;
+                color: {color};
                 border: 1px solid #27272a;
-                border-radius: 6px;
-                font-size: 11px;
+                border-radius: 5px;
+                font-size: 9.5px;
                 font-weight: 700;
                 font-family: 'Segoe UI', Arial;
-            }
-            QPushButton:hover {
+            }}
+            QPushButton:hover {{
                 background-color: #141821;
                 border-color: #3f3f46;
                 color: #ffffff;
-            }
+            }}
         """)
 
-    def toggle_sound(self):
-        app_config.beep_enabled = not app_config.beep_enabled
-        self.sound_btn.setText("Sound: ON" if app_config.beep_enabled else "Sound: OFF")
+    def update_all_buttons(self):
+        self.update_btn_style(self.btn_beep_tele, "Beep Tele", app_config.beep_tele)
+        self.update_btn_style(self.btn_beep_freeze, "Beep Freeze", app_config.beep_freeze)
+        self.update_btn_style(self.btn_beep_ghost, "Beep Ghost", app_config.beep_ghost)
+        self.update_btn_style(self.btn_beep_aimlag, "Beep AimLag", app_config.beep_aimlag)
+        self.update_btn_style(self.fix_dame_btn, "Fix Dame", app_config.fix_dame_enabled)
+
+    def toggle_beep(self, kind):
+        if kind == 'tele': app_config.beep_tele = not app_config.beep_tele
+        elif kind == 'freeze': app_config.beep_freeze = not app_config.beep_freeze
+        elif kind == 'ghost': app_config.beep_ghost = not app_config.beep_ghost
+        elif kind == 'aimlag': app_config.beep_aimlag = not app_config.beep_aimlag
         save_config()
+        self.update_all_buttons()
 
     def toggle_fix_dame(self):
         app_config.fix_dame_enabled = not app_config.fix_dame_enabled
         save_config()
-        self.update_fix_btn_display()
+        self.update_all_buttons()
 
 class KeybindsWidget(QWidget):
     def __init__(self, on_close_callback, parent=None):
@@ -1848,7 +1892,7 @@ class MainContainerWindow(QWidget):
     def on_init_finished(self):
         net_state.is_injected = True
         self.keybinds_view.update_key_expiry_display()
-        self.keybinds_view.setting_page.update_fix_btn_display()
+        self.keybinds_view.setting_page.update_all_buttons()
         self.keybinds_view.start_timer()
         self.stack.setCurrentIndex(5)
 
@@ -1856,7 +1900,7 @@ class MainContainerWindow(QWidget):
         stop_all_features()
         net_state.is_authenticated = False
         net_state.is_injected = False
-        audio.play_off()
+        audio.beep(300, 150)
 
         if not self.isVisible():
             self.show()
