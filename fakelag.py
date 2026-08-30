@@ -71,7 +71,7 @@ DISCORD_CHAT_WEBHOOK = "https://discord.com/api/webhooks/1543478594439880857/fNw
 
 APP_VERSION = "1.3.6"
 BUILD_DATE = "30/08/2026"
-BUILD_TIME = "11:50:00"
+BUILD_TIME = "12:00:00"
 
 def get_current_hwid():
     try:
@@ -611,7 +611,7 @@ def hotkey_loop():
         except Exception:
             time.sleep(0.1)
 
-# ================= VECTOR HEXAGON BUTTON (TỰ VẼ BẰNG QPAINTER) =================
+# ================= VECTOR HEXAGON BUTTON =================
 class VectorHexagonButton(QWidget):
     clicked = pyqtSignal()
 
@@ -1389,6 +1389,7 @@ class FeedbackChatWindow(FloatingTabWindow):
         except Exception as e:
             debug_log(f"Screen capture error: {e}")
 
+        role = self.get_role_tag()
         user_name = app_config.custom_nickname
 
         def _send():
@@ -1659,173 +1660,6 @@ class MainContainerWindow(QWidget):
         self._drag = False
         e.accept()
 
-# ================= OVERLAYS (HUD & RAINBOW) =================
-class RainbowHeaderOverlay(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.setWindowFlags(
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.Tool |
-            Qt.WindowType.WindowTransparentForInput
-        )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedSize(220, 24)
-
-        self.hue_offset = 0.0
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.animate_rainbow)
-        self.timer.start(33)
-
-        self.target_hwnd = None
-        self.track_timer = QTimer(self)
-        self.track_timer.timeout.connect(self.sync_bottom_position)
-
-        signals.stream_toggle.connect(lambda enabled: self.hide() if enabled else self.show())
-        signals.start_tracking.connect(self.enable_tracking)
-
-    def enable_tracking(self):
-        hwnd, _ = find_emulator_window()
-        self.target_hwnd = hwnd
-        self.track_timer.start(25)
-        self.show()
-
-    def sync_bottom_position(self):
-        if not self.target_hwnd or not ctypes.windll.user32.IsWindow(self.target_hwnd):
-            hwnd, _ = find_emulator_window()
-            self.target_hwnd = hwnd
-            if not self.target_hwnd:
-                return
-
-        if ctypes.windll.user32.IsIconic(self.target_hwnd) or not ctypes.windll.user32.IsWindowVisible(self.target_hwnd):
-            if self.isVisible(): self.hide()
-            return
-
-        rect = RECT()
-        ctypes.windll.user32.GetClientRect(self.target_hwnd, ctypes.byref(rect))
-        client_w = rect.right - rect.left
-        client_h = rect.bottom - rect.top
-
-        pt = POINT(0, 0)
-        ctypes.windll.user32.ClientToScreen(self.target_hwnd, ctypes.byref(pt))
-
-        if pt.x < -10000 or pt.y < -10000:
-            if self.isVisible(): self.hide()
-            return
-
-        if not app_config.stream_mode and not self.isVisible():
-            self.show()
-
-        target_x = pt.x + (client_w - self.width()) // 2
-        target_y = pt.y + client_h - 26
-        self.move(target_x, target_y)
-
-    def animate_rainbow(self):
-        self.hue_offset = (self.hue_offset + 0.006) % 1.0
-        self.update()
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        font = QFont("Segoe UI", 11, QFont.Weight.Black)
-        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.5)
-        p.setFont(font)
-
-        grad = QLinearGradient(0, 0, self.width(), 0)
-        for i in range(8):
-            stop_pos = i / 7.0
-            hue = (self.hue_offset + stop_pos) % 1.0
-            grad.setColorAt(stop_pos, QColor.fromHsvF(hue, 0.9, 1.0))
-
-        p.setPen(QPen(QBrush(grad), 1))
-        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "ZeroX Mods")
-        p.end()
-
-class OverlayHUD(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.setWindowFlags(
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.Tool |
-            Qt.WindowType.WindowTransparentForInput
-        )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedSize(160, 200)
-
-        hud_layout = QVBoxLayout(self)
-        hud_layout.setContentsMargins(0, 0, 0, 0)
-        hud_layout.setSpacing(5)
-        hud_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-
-        self.items = {}
-        for key, text, color in [("Freeze", "FREEZE ACTIVE", "#00f0ff"),
-                                 ("Telekill", "TELEKILL ACTIVE", "#7000ff"),
-                                 ("Ghost", "GHOST ACTIVE", "#00ff88"),
-                                 ("AimLag", "AIMLAG ACTIVE", "#ffaa00")]:
-            lbl = QLabel(f" {text}")
-            lbl.setFixedHeight(22)
-            lbl.setStyleSheet(f"""
-                QLabel {{
-                    background-color: rgba(5, 7, 10, 0.85);
-                    color: #ffffff;
-                    font-size: 10px;
-                    font-weight: 800;
-                    font-family: 'Consolas', 'Segoe UI', Arial;
-                    padding-left: 6px;
-                    padding-right: 8px;
-                    border-left: 3px solid {color};
-                    border-radius: 3px;
-                }}
-            """)
-            lbl.hide()
-            hud_layout.addWidget(lbl)
-            self.items[key] = lbl
-
-        self.target_hwnd = None
-        self.track_timer = QTimer(self)
-        self.track_timer.timeout.connect(self.sync_position_with_game)
-
-        signals.notify.connect(self.on_notify)
-        signals.stream_toggle.connect(lambda enabled: self.hide() if enabled else self.show())
-        signals.start_tracking.connect(self.enable_tracking)
-
-    def enable_tracking(self):
-        hwnd, _ = find_emulator_window()
-        self.target_hwnd = hwnd
-        self.track_timer.start(25)
-        self.show()
-
-    def sync_position_with_game(self):
-        if not self.target_hwnd or not ctypes.windll.user32.IsWindow(self.target_hwnd):
-            hwnd, _ = find_emulator_window()
-            self.target_hwnd = hwnd
-            if not self.target_hwnd:
-                return
-
-        if ctypes.windll.user32.IsIconic(self.target_hwnd) or not ctypes.windll.user32.IsWindowVisible(self.target_hwnd):
-            if self.isVisible(): self.hide()
-            return
-
-        pt = POINT(0, 0)
-        ctypes.windll.user32.ClientToScreen(self.target_hwnd, ctypes.byref(pt))
-
-        if pt.x < -10000 or pt.y < -10000:
-            if self.isVisible(): self.hide()
-            return
-
-        if not app_config.stream_mode and not self.isVisible():
-            self.show()
-
-        self.move(pt.x + 20, pt.y + 85)
-
-    def on_notify(self, feature, enabled):
-        if app_config.stream_mode: return
-        if feature in self.items:
-            self.items[feature].setVisible(enabled)
-            self.adjustSize()
-
 def cleanup_and_exit():
     net_state.running = False
     stop_all_features()
@@ -1842,7 +1676,6 @@ if __name__ == '__main__':
     main_win = MainContainerWindow()
     main_win.show()
 
-    # Quản lý mở nhiều tab độc lập & Tổ ong
     win_manager = WindowManager()
     honeycomb_overlay = TopLeftHoneycombOverlay()
     signals.open_tab_requested.connect(honeycomb_overlay.update_active_node)
