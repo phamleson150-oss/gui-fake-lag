@@ -68,9 +68,9 @@ LICENSE_FILE = "zerox_license.json"
 DISCORD_FEEDBACK_WEBHOOK = "https://discord.com/api/webhooks/1543470614025863308/SD9lOHs2pxJZFrdFFuYQMBOkKAF_6xgY8xetSagvXEU8fUc4O5e_jriDdIIbO1vylQrL"
 DISCORD_CHAT_WEBHOOK = "https://discord.com/api/webhooks/1543478594439880857/fNw9bdIjZP5-1dRfflPKlVLVPRJN4Qz67DZ-E31Y4ArDQGlVOS_M3XTDREOv7_VueEwn"
 
-APP_VERSION = "1.3.7"
+APP_VERSION = "1.3.6"
 BUILD_DATE = "30/08/2026"
-BUILD_TIME = "12:10:00"
+BUILD_TIME = "12:00:00"
 
 def get_current_hwid():
     try:
@@ -314,7 +314,6 @@ class AppSignals(QObject):
     key_expired = pyqtSignal()
     open_tab_requested = pyqtSignal(int)
     show_honeycomb = pyqtSignal()
-    new_chat_message = pyqtSignal(dict)
 
 signals = AppSignals()
 
@@ -463,9 +462,9 @@ def divert_freeze_fix_dame_worker():
             debug_log(f"Freeze fix divert error: {e}")
             time.sleep(0.05)
 
-# ================= TOGGLE CHỨC NĂNG =================
+# ================= TOGGLE CHỨC NĂNG (CHỈ CHẠY ĐÚNG TAB 0) =================
 def toggle_freeze():
-    if not net_state.is_injected: return
+    if not net_state.is_injected or net_state.current_tab != 0: return
     with net_state.lock:
         if net_state.freeze_mode:
             net_state.freeze_mode = False
@@ -484,7 +483,7 @@ def toggle_freeze():
     signals.notify.emit('Freeze', active)
 
 def toggle_ghost():
-    if not net_state.is_injected: return
+    if not net_state.is_injected or net_state.current_tab != 0: return
     with net_state.lock:
         if net_state.ghost_mode:
             net_state.ghost_mode = False
@@ -499,7 +498,7 @@ def toggle_ghost():
     signals.notify.emit('Ghost', active)
 
 def toggle_tele():
-    if not net_state.is_injected: return
+    if not net_state.is_injected or net_state.current_tab != 0: return
     with net_state.lock:
         if net_state.tele_mode:
             net_state.tele_mode = False
@@ -514,7 +513,7 @@ def toggle_tele():
     signals.notify.emit('Telekill', active)
 
 def toggle_aimlag_arm():
-    if not net_state.is_injected: return
+    if not net_state.is_injected or net_state.current_tab != 0: return
     with net_state.lock:
         net_state.aimlag_armed = not net_state.aimlag_armed
         active = net_state.aimlag_armed
@@ -526,7 +525,7 @@ def toggle_aimlag_arm():
     signals.notify.emit('AimLag', active)
 
 def on_mouse_click(x, y, button, pressed):
-    if not net_state.is_authenticated or not net_state.is_injected:
+    if not net_state.is_authenticated or not net_state.is_injected or net_state.current_tab != 0:
         return
 
     if button == pynput_mouse.Button.left:
@@ -578,21 +577,23 @@ def hotkey_loop():
                 if is_freeze and f_time > 0 and (curr_t - f_time >= FREEZE_AUTO_DISABLE_SEC):
                     toggle_freeze()
 
-            cur_t = keyboard.is_pressed(app_config.tele_hotkey.key)
-            if cur_t and not tp: toggle_tele()
-            tp = cur_t
+            # Chỉ cho phép kích hoạt hotkey chức năng khi đang ở tab 0 (Fake Lag)
+            if net_state.current_tab == 0:
+                cur_t = keyboard.is_pressed(app_config.tele_hotkey.key)
+                if cur_t and not tp: toggle_tele()
+                tp = cur_t
 
-            cur_f = keyboard.is_pressed(app_config.freeze_hotkey.key)
-            if cur_f and not fp: toggle_freeze()
-            fp = cur_f
+                cur_f = keyboard.is_pressed(app_config.freeze_hotkey.key)
+                if cur_f and not fp: toggle_freeze()
+                fp = cur_f
 
-            cur_g = keyboard.is_pressed(app_config.ghost_hotkey.key)
-            if cur_g and not gp: toggle_ghost()
-            gp = cur_g
+                cur_g = keyboard.is_pressed(app_config.ghost_hotkey.key)
+                if cur_g and not gp: toggle_ghost()
+                gp = cur_g
 
-            cur_a = keyboard.is_pressed(app_config.aimlag_hotkey.key)
-            if cur_a and not ap: toggle_aimlag_arm()
-            ap = cur_a
+                cur_a = keyboard.is_pressed(app_config.aimlag_hotkey.key)
+                if cur_a and not ap: toggle_aimlag_arm()
+                ap = cur_a
 
             cur_h = keyboard.is_pressed(app_config.hide_hotkey.key)
             if cur_h and not hp: signals.toggle_visibility.emit()
@@ -674,23 +675,13 @@ class VectorHexagonButton(QWidget):
         s = r * 0.44
 
         if self.icon_type == 'network':
-            # Vẽ icon mạng / sóng (Network icon) ở giữa
-            p.drawEllipse(QPointF(cx, cy + s*0.5), s*0.2, s*0.2)
-            path.moveTo(cx - s*0.6, cy)
-            path.arcTo(QRectF(cx - s*0.6, cy - s*0.6, s*1.2, s*1.2), 45, 90)
+            p.drawEllipse(QPointF(cx, cy - s*0.2), s*0.7, s*0.7)
+            p.drawLine(QPointF(cx - s*0.5, cy - s*0.2), QPointF(cx + s*0.5, cy - s*0.2))
+            p.drawLine(QPointF(cx, cy - s*0.9), QPointF(cx, cy + s*0.5))
+            path.moveTo(cx - s*0.4, cy + s*0.5)
+            path.lineTo(cx, cy + s*0.9)
+            path.lineTo(cx + s*0.4, cy + s*0.5)
             p.drawPath(path)
-            path2 = QPainterPath()
-            path2.moveTo(cx - s*0.9, cy - s*0.3)
-            path2.arcTo(QRectF(cx - s*0.9, cy - s*0.9, s*1.8, s*1.8), 45, 90)
-            p.drawPath(path2)
-
-        elif self.icon_type == 'target':
-            p.drawEllipse(QPointF(cx, cy), s*0.85, s*0.85)
-            p.drawEllipse(QPointF(cx, cy), s*0.35, s*0.35)
-            p.drawLine(QPointF(cx - s*1.15, cy), QPointF(cx - s*0.5, cy))
-            p.drawLine(QPointF(cx + s*0.5, cy), QPointF(cx + s*1.15, cy))
-            p.drawLine(QPointF(cx, cy - s*1.15), QPointF(cx, cy - s*0.5))
-            p.drawLine(QPointF(cx, cy + s*0.5), QPointF(cx, cy + s*1.15))
 
         elif self.icon_type == 'user':
             p.drawEllipse(QPointF(cx, cy - s*0.45), s*0.4, s*0.4)
@@ -745,7 +736,7 @@ class VectorHexagonButton(QWidget):
 
         p.end()
 
-# ================= TOP LEFT HONEYCOMB OVERLAY (GÓC TRÁI MÀN HÌNH) =================
+# ================= TOP LEFT HONEYCOMB OVERLAY =================
 class TopLeftHoneycombOverlay(QWidget):
     def __init__(self):
         super().__init__()
@@ -766,7 +757,7 @@ class TopLeftHoneycombOverlay(QWidget):
         self.hex_buttons = {}
 
         nodes = [
-            (center_x, center_y, 'network', "Fake Lag (Bấm mở Menu)", False, 0),
+            (center_x, center_y, 'network', "Fake Lag (Bấm mở/tắt Menu)", False, 0),
             (center_x - dx/2, center_y - dy, 'user', "Thông Tin Máy & Key", False, 2),
             (center_x + dx/2, center_y - dy, 'shield', "Bảo vệ Antiban (Bảo trì)", True, 4),
             (center_x - dx, center_y, 'diamond', "Chức Năng VIP (Bảo trì)", True, 4),
@@ -1627,7 +1618,7 @@ class SettingTabPage(QWidget):
         btn.setText(f"{text}: {'ON' if enabled else 'OFF'}")
         color = "#00ff66" if enabled else "#9ca3af"
         btn.setStyleSheet(f"""
-            QPushButton {{
+            QPushButton {
                 background-color: #0e1117;
                 color: {color};
                 border: 1px solid #27272a;
@@ -1635,8 +1626,8 @@ class SettingTabPage(QWidget):
                 font-size: 9.5px;
                 font-weight: 700;
                 font-family: 'Segoe UI', Arial;
-            }}
-            QPushButton:hover {{ background-color: #141821; border-color: #3f3f46; color: #ffffff; }}
+            }
+            QPushButton:hover { background-color: #141821; border-color: #3f3f46; color: #ffffff; }
         """)
 
     def update_all_buttons(self):
@@ -1740,7 +1731,7 @@ class InfoTabPage(QWidget):
         self.lbl_expiry.setText(f"Thời hạn còn lại: {time_str}")
         self.lbl_user.setText(f"Tên hiển thị: <span style='color:#22c55e; font-weight:bold;'>✔ {app_config.custom_nickname}</span>")
 
-# TAB 3: FEEDBACK & CHAT (HIỆN TIN NHẮN TRÊN PHẦN CHAT CỦA TAB)
+# TAB 3: FEEDBACK & CHAT
 class FeedbackChatTabPage(QWidget):
     def __init__(self, parent_widget, parent=None):
         super().__init__(parent)
@@ -1845,7 +1836,9 @@ class FeedbackChatTabPage(QWidget):
 
         self.switch_sub_tab(0)
 
-        signals.new_chat_message.connect(self._render_messages)
+        self.chat_timer = QTimer(self)
+        self.chat_timer.timeout.connect(self.fetch_vps_chat)
+        self.chat_timer.start(3000)
 
     def on_name_changed(self, text):
         val = text.strip() or DEFAULT_USERNAME
@@ -1873,13 +1866,12 @@ class FeedbackChatTabPage(QWidget):
                 r = requests.get(VPS_CHAT_URL, timeout=3)
                 if r.status_code == 200:
                     messages = r.json().get("messages", [])
-                    signals.new_chat_message.emit({"messages": messages})
+                    QTimer.singleShot(0, lambda: self._render_messages(messages))
             except Exception:
                 pass
         threading.Thread(target=_fetch, daemon=True).start()
 
-    def _render_messages(self, data):
-        messages = data.get("messages", [])
+    def _render_messages(self, messages):
         html_lines = []
         for m in messages:
             t = m.get("time", "00:00")
@@ -2004,14 +1996,14 @@ class ComingSoonTabPage(QWidget):
 
 # ================= CONTAINER KEYBINDS & CÁC TAB =================
 class KeybindsWidget(QWidget):
-    def __init__(self, on_close_callback, on_minimize_callback, parent=None):
+    def __init__(self, on_close_callback, parent=None):
         super().__init__(parent)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 4, 10, 6)
         layout.setSpacing(4)
 
-        self.top_bar = TopBar("ZeroX", on_close=on_close_callback, on_minimize=on_minimize_callback)
+        self.top_bar = TopBar("ZeroX", on_close=on_close_callback)
         layout.addWidget(self.top_bar)
 
         self.tab_stack = SlidingStackedWidget(self)
@@ -2021,11 +2013,11 @@ class KeybindsWidget(QWidget):
         self.feedback_page = FeedbackChatTabPage(self)
         self.coming_soon_page = ComingSoonTabPage(self)
 
-        self.tab_stack.addWidget(self.main_page)       # 0: Fake Lag
-        self.tab_stack.addWidget(self.setting_page)     # 1: Setting
-        self.tab_stack.addWidget(self.info_page)        # 2: Info
-        self.tab_stack.addWidget(self.feedback_page)    # 3: Feedback & Chat
-        self.tab_stack.addWidget(self.coming_soon_page) # 4: Coming Soon (Bảo trì)
+        self.tab_stack.addWidget(self.main_page)         # 0: Fake Lag
+        self.tab_stack.addWidget(self.setting_page)       # 1: Setting
+        self.tab_stack.addWidget(self.info_page)          # 2: Info
+        self.tab_stack.addWidget(self.feedback_page)      # 3: Feedback & Chat
+        self.tab_stack.addWidget(self.coming_soon_page)   # 4: Coming Soon (Bảo trì)
         layout.addWidget(self.tab_stack)
 
         self.countdown_timer = QTimer(self)
@@ -2033,23 +2025,14 @@ class KeybindsWidget(QWidget):
 
         signals.open_tab_requested.connect(self.switch_tab_direct)
 
-        self.chat_poll_timer = QTimer(self)
-        self.chat_poll_timer.timeout.connect(self.poll_chat_background)
-        self.chat_poll_timer.start(3000)
-
-    def poll_chat_background(self):
-        if self.tab_stack.currentIndex() != 3:
-            def _fetch():
-                try:
-                    r = requests.get(VPS_CHAT_URL, timeout=3)
-                    if r.status_code == 200:
-                        messages = r.json().get("messages", [])
-                        signals.new_chat_message.emit({"messages": messages})
-                except Exception:
-                    pass
-            threading.Thread(target=_fetch, daemon=True).start()
-
     def switch_tab_direct(self, index: int):
+        # Nếu bấm vào tab đang được bật, tiến hành ẩn bảng điều khiển (toggle visibility)
+        if net_state.current_tab == index:
+            signals.toggle_visibility.emit()
+            return
+
+        if net_state.current_tab == 0 and index != 0:
+            stop_all_features()
         net_state.current_tab = index
 
         if index == 2:
@@ -2296,10 +2279,10 @@ class MainContainerWindow(QWidget):
         self.login_view = LoginWidget(self.on_login_success, cleanup_and_exit, self.showMinimized)
         self.download_view = DownloadWidget(self.on_inject_clicked, cleanup_and_exit)
         self.init_view = InitializingWidget(self.on_init_finished)
-        self.keybinds_view = KeybindsWidget(self.hide, self.showMinimized)
+        self.keybinds_view = KeybindsWidget(cleanup_and_exit)
         self.expired_view = KeyExpiredWidget(self.on_expired_relogin, cleanup_and_exit)
 
-        self.stack.addWidget(self.init_gui_view)       # 0
+        self.stack.addWidget(self.init_gui_view)      # 0
         self.stack.addWidget(self.adb_loading_view)    # 1
         self.stack.addWidget(self.login_view)          # 2
         self.stack.addWidget(self.download_view)       # 3
@@ -2392,7 +2375,7 @@ class MainContainerWindow(QWidget):
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
             self._drag = True
-            self._pos = e.globalPosition().toPoint() - self.keybinds_view.frameGeometry().topLeft() if hasattr(self, 'keybinds_view') else e.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            self._pos = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
             e.accept()
 
     def mouseMoveEvent(self, e):
