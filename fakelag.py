@@ -2,6 +2,7 @@ import os
 import sys
 import threading
 import time
+import math
 import ctypes
 from ctypes import wintypes
 import winsound
@@ -12,6 +13,7 @@ import urllib.parse
 import webbrowser
 from collections import deque
 from dataclasses import dataclass
+from datetime import datetime
 
 try:
     import pydivert
@@ -41,23 +43,30 @@ except ImportError:
 try:
     from PyQt6.QtWidgets import (
         QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-        QPushButton, QFrame, QStackedWidget, QLineEdit, QGridLayout
+        QPushButton, QFrame, QStackedWidget, QLineEdit, QGridLayout,
+        QTextEdit
     )
-    from PyQt6.QtCore import Qt, pyqtSignal, QObject, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup
-    from PyQt6.QtGui import QColor, QPainter, QBrush, QPen, QFont, QLinearGradient, QRadialGradient
+    from PyQt6.QtCore import Qt, pyqtSignal, QObject, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QBuffer, QIODevice
+    from PyQt6.QtGui import QColor, QPainter, QBrush, QPen, QFont, QLinearGradient, QRadialGradient, QPolygonF, QGuiApplication
 except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "PyQt6"])
     from PyQt6.QtWidgets import (
         QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-        QPushButton, QFrame, QStackedWidget, QLineEdit, QGridLayout
+        QPushButton, QFrame, QStackedWidget, QLineEdit, QGridLayout,
+        QTextEdit
     )
-    from PyQt6.QtCore import Qt, pyqtSignal, QObject, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup
-    from PyQt6.QtGui import QColor, QPainter, QBrush, QPen, QFont, QLinearGradient, QRadialGradient
+    from PyQt6.QtCore import Qt, pyqtSignal, QObject, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QBuffer, QIODevice
+    from PyQt6.QtGui import QColor, QPainter, QBrush, QPen, QFont, QLinearGradient, QRadialGradient, QPolygonF, QGuiApplication
 
 # ================= CẤU HÌNH HỆ THỐNG =================
 VPS_VERIFY_URL = "http://103.78.3.222:53689/api/verify_key"
 GET_KEY_URL = "http://103.78.3.222:53689/"
 LICENSE_FILE = "zerox_license.json"
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1543470614025863308/SD9lOHs2pxJZFrdFFuYQMBOkKAF_6xgY8xetSagvXEU8fUc4O5e_jriDdIIbO1vylQrL"
+
+APP_VERSION = "1.3.4"
+BUILD_DATE = "30/08/2026"
+BUILD_TIME = "11:00:00"
 
 def get_current_hwid():
     try:
@@ -70,6 +79,7 @@ def get_current_hwid():
     return "HWID-DEFAULT-001"
 
 CURRENT_HWID = get_current_hwid()
+LOCAL_USERNAME = os.environ.get('USERNAME', os.environ.get('USER', 'User'))
 
 def load_saved_key():
     try:
@@ -313,12 +323,20 @@ class NetState:
         self.is_injected = False
         self.active_key = ""
         self.key_expires_at = -1
+        self.cached_ip = "Đang tải..."
         
         self.freeze_active_time = 0.0
 
 net_state = NetState()
 
-# ================= BỘ ĐIỀU PHỐI MẠNG TỰ GIẢI PHÓNG LUỒNG =================
+def fetch_ip_background():
+    try:
+        r = requests.get('https://api.ipify.org?format=json', timeout=3)
+        net_state.cached_ip = r.json().get('ip', '127.0.0.1')
+    except Exception:
+        net_state.cached_ip = "127.0.0.1"
+
+# ================= BỘ ĐIỀU PHỐI MẠNG =================
 class DivertSession:
     def __init__(self, filter_str, max_packets=MAX_PACKETS):
         self.filter_str = filter_str
@@ -582,7 +600,131 @@ def hotkey_loop():
         except Exception:
             time.sleep(0.1)
 
-# ================= UI WIDGETS & COMPONENTS =================
+# ================= WIDGET MENU TỔ ONG (HONEYCOMB 7 HEXAGONS) =================
+class HexagonButton(QWidget):
+    clicked = pyqtSignal()
+
+    def __init__(self, icon_text, tooltip_text, is_maintenance=False, is_active=False, radius=26, parent=None):
+        super().__init__(parent)
+        self.icon_text = icon_text
+        self.tooltip_text = tooltip_text
+        self.is_maintenance = is_maintenance
+        self.is_active = is_active
+        self.radius = radius
+        self.setFixedSize(int(radius * 2), int(radius * 2))
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip(tooltip_text)
+        self._hover = False
+
+    def enterEvent(self, event):
+        self._hover = True
+        self.update()
+
+    def leaveEvent(self, event):
+        self._hover = False
+        self.update()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        cx, cy = self.width() / 2.0, self.height() / 2.0
+        r = self.radius - 2.5
+
+        # Tính toán 6 đỉnh của lục giác (pointy-topped)
+        poly = QPolygonF()
+        for i in range(6):
+            deg = 60 * i - 30
+            rad = math.radians(deg)
+            poly.append(QPointF(cx + r * math.cos(rad), cy + r * math.sin(rad)))
+
+        if self.is_maintenance:
+            bg_color = QColor("#12141a") if not self._hover else QColor("#181b24")
+            border_color = QColor("#ef4444") if self._hover else QColor("#222734")
+            icon_color = QColor("#6b7280") if not self._hover else QColor("#ef4444")
+        elif self.is_active:
+            bg_color = QColor("#1e293b")
+            border_color = QColor("#00ff66")
+            icon_color = QColor("#00ff66")
+        else:
+            bg_color = QColor("#161a24") if not self._hover else QColor("#222838")
+            border_color = QColor("#38bdf8") if self._hover else QColor("#2e384d")
+            icon_color = QColor("#ffffff") if self._hover else QColor("#9ca3af")
+
+        p.setBrush(QBrush(bg_color))
+        p.setPen(QPen(border_color, 1.8))
+        p.drawPolygon(poly)
+
+        # Vẽ Icon ở tâm
+        p.setPen(icon_color)
+        p.setFont(QFont("Segoe UI Emoji", int(r * 0.58), QFont.Weight.Bold))
+        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.icon_text)
+
+        # Nếu bảo trì, vẽ chấm đỏ nhỏ báo hiệu
+        if self.is_maintenance:
+            p.setBrush(QBrush(QColor("#ef4444")))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawEllipse(QPointF(cx + r*0.5, cy - r*0.5), 2.5, 2.5)
+
+        p.end()
+
+class HoneycombNavWidget(QWidget):
+    tab_selected = pyqtSignal(int)
+    maintenance_clicked = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.current_tab = 0
+        self.hex_buttons = {}
+        
+        # Bố cục 7 ô tổ ong: (Row, Col_Offset)
+        # R = 27
+        r = 26
+        dx = math.sqrt(3) * r + 4 # Khoảng cách ngang
+        dy = 1.5 * r + 3          # Khoảng cách dọc
+        
+        center_x, center_y = 110, 105
+        self.setFixedSize(220, 210)
+
+        # Định nghĩa 7 vị trí (cx, cy, icon, tooltip, type, tab_idx/name)
+        nodes = [
+            (center_x, center_y, "⚡", "Fake Lag", False, 0),                       # Center: Fake Lag
+            (center_x - dx/2, center_y - dy, "👤", "Info Máy & Key", False, 2),     # Top-Left: Info
+            (center_x + dx/2, center_y - dy, "🛡️", "Bảo vệ Antiban", True, "Antiban"),# Top-Right: Bảo trì
+            (center_x - dx, center_y, "💎", "Chức Năng VIP", True, "VIP Features"),  # Mid-Left: Bảo trì
+            (center_x + dx, center_y, "💬", "Feedback & Chat", False, 3),          # Mid-Right: Feedback/Chat
+            (center_x - dx/2, center_y + dy, "📊", "Thống Kê", True, "Statistics"),  # Bot-Left: Bảo trì
+            (center_x + dx/2, center_y + dy, "⚙️", "Cài Đặt", False, 1)             # Bot-Right: Setting
+        ]
+
+        for x, y, icon, tip, is_maint, target in nodes:
+            btn = HexagonButton(icon, tip, is_maintenance=is_maint, radius=r, parent=self)
+            btn.move(int(x - r), int(y - r))
+            
+            if is_maint:
+                btn.clicked.connect(lambda t=target: self.maintenance_clicked.emit(t))
+            else:
+                btn.clicked.connect(lambda idx=target: self.handle_tab_click(idx))
+            
+            self.hex_buttons[target] = btn
+
+        self.update_active_hex(0)
+
+    def handle_tab_click(self, idx):
+        self.update_active_hex(idx)
+        self.tab_selected.emit(idx)
+
+    def update_active_hex(self, idx):
+        self.current_tab = idx
+        for k, btn in self.hex_buttons.items():
+            if not btn.is_maintenance:
+                btn.is_active = (k == idx)
+                btn.update()
+
 class SlidingStackedWidget(QStackedWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -609,13 +751,13 @@ class SlidingStackedWidget(QStackedWidget):
         next_w.raise_()
 
         anim_curr = QPropertyAnimation(curr_w, b"pos")
-        anim_curr.setDuration(220)
+        anim_curr.setDuration(200)
         anim_curr.setStartValue(QPoint(0, 0))
         anim_curr.setEndValue(QPoint(-w * direction, 0))
         anim_curr.setEasingCurve(QEasingCurve.Type.OutCubic)
 
         anim_next = QPropertyAnimation(next_w, b"pos")
-        anim_next.setDuration(220)
+        anim_next.setDuration(200)
         anim_next.setStartValue(offset)
         anim_next.setEndValue(QPoint(0, 0))
         anim_next.setEasingCurve(QEasingCurve.Type.OutCubic)
@@ -655,9 +797,9 @@ class GlowingCircleDot(QWidget):
 class TopBar(QWidget):
     def __init__(self, title_text, on_close=None, on_minimize=None, on_logo_click=None, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(24)
+        self.setFixedHeight(26)
         self.layout = QHBoxLayout(self)
-        self.layout.setContentsMargins(10, 0, 8, 0)
+        self.layout.setContentsMargins(8, 0, 8, 0)
         self.layout.setSpacing(6)
 
         self.layout.addWidget(GlowingCircleDot())
@@ -668,11 +810,13 @@ class TopBar(QWidget):
             self.title_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
             self.title_lbl.mousePressEvent = lambda e: on_logo_click()
         self.layout.addWidget(self.title_lbl)
-        self.layout.addStretch()
 
-        self.right_container = QHBoxLayout()
-        self.right_container.setSpacing(4)
-        self.layout.addLayout(self.right_container)
+        # Tab Navigation Container
+        self.tab_nav_layout = QHBoxLayout()
+        self.tab_nav_layout.setSpacing(4)
+        self.layout.addLayout(self.tab_nav_layout)
+
+        self.layout.addStretch()
 
         if on_minimize:
             min_btn = QPushButton("—")
@@ -711,7 +855,7 @@ class Particle:
 class CustomParticleFrame(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.particles = [Particle(340, 255) for _ in range(30)]
+        self.particles = [Particle(360, 265) for _ in range(30)]
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.animate_particles)
         self.timer.start(33)
@@ -1064,6 +1208,7 @@ class LoginWidget(QWidget):
             save_license_key(user_key)
             self.status_msg.setStyleSheet("color: #00ff66; font-size: 9px; font-weight: bold;")
             self.status_msg.setText(msg)
+            threading.Thread(target=fetch_ip_background, daemon=True).start()
             QTimer.singleShot(350, self.on_login_success)
         else:
             self.status_msg.setStyleSheet("color: #ef4444; font-size: 9px; font-weight: bold;")
@@ -1316,18 +1461,18 @@ class MainTabPage(QWidget):
         self.parent_widget = parent_widget
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(4)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(5)
 
         self.btn_tele = self.create_key_row(layout, "TELEKILL", app_config.tele_hotkey, 'tele_hotkey')
         self.btn_freeze = self.create_key_row(layout, "FREEZE", app_config.freeze_hotkey, 'freeze_hotkey')
         self.btn_ghost = self.create_key_row(layout, "GHOST", app_config.ghost_hotkey, 'ghost_hotkey')
-        self.btn_aimlag = self.create_key_row(layout, "AIM LAG ", app_config.aimlag_hotkey, 'aimlag_hotkey')
+        self.btn_aimlag = self.create_key_row(layout, "AIM LAG", app_config.aimlag_hotkey, 'aimlag_hotkey')
 
-        layout.addSpacing(4)
-        hint_lbl = QLabel("Dev:Le Son")
+        layout.addSpacing(6)
+        hint_lbl = QLabel("Dev: Le Son")
         hint_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint_lbl.setStyleSheet("color: #71717a; font-size: 8.5px; font-weight: 500; font-family: 'Segoe UI', Arial;")
+        hint_lbl.setStyleSheet("color: #71717a; font-size: 9px; font-weight: 500; font-family: 'Segoe UI', Arial;")
         layout.addWidget(hint_lbl)
         layout.addStretch()
 
@@ -1341,7 +1486,7 @@ class MainTabPage(QWidget):
         row.addStretch()
 
         btn = QPushButton(config_obj.key.upper())
-        btn.setFixedSize(58, 24)
+        btn.setFixedSize(58, 25)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setStyleSheet("""
             QPushButton {
@@ -1380,26 +1525,20 @@ class SettingTabPage(QWidget):
         self.parent_widget = parent_widget
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(4)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(5)
 
         grid = QGridLayout()
-        grid.setSpacing(4)
+        grid.setSpacing(5)
 
         self.btn_beep_tele = QPushButton()
         self.btn_beep_freeze = QPushButton()
         self.btn_beep_ghost = QPushButton()
         self.btn_beep_aimlag = QPushButton()
 
-        self.btn_beep_tele.setFixedHeight(26)
-        self.btn_beep_freeze.setFixedHeight(26)
-        self.btn_beep_ghost.setFixedHeight(26)
-        self.btn_beep_aimlag.setFixedHeight(26)
-
-        self.btn_beep_tele.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_beep_freeze.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_beep_ghost.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_beep_aimlag.setCursor(Qt.CursorShape.PointingHandCursor)
+        for b in [self.btn_beep_tele, self.btn_beep_freeze, self.btn_beep_ghost, self.btn_beep_aimlag]:
+            b.setFixedHeight(27)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self.btn_beep_tele.clicked.connect(lambda: self.toggle_beep('tele'))
         self.btn_beep_freeze.clicked.connect(lambda: self.toggle_beep('freeze'))
@@ -1414,7 +1553,7 @@ class SettingTabPage(QWidget):
         layout.addLayout(grid)
 
         self.fix_dame_btn = QPushButton()
-        self.fix_dame_btn.setFixedHeight(26)
+        self.fix_dame_btn.setFixedHeight(28)
         self.fix_dame_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.fix_dame_btn.clicked.connect(self.toggle_fix_dame)
         layout.addWidget(self.fix_dame_btn)
@@ -1463,83 +1602,391 @@ class SettingTabPage(QWidget):
         self.update_all_buttons()
         stop_all_features()
 
+class InfoTabPage(QWidget):
+    def __init__(self, parent_widget, parent=None):
+        super().__init__(parent)
+        self.parent_widget = parent_widget
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 2, 6, 2)
+        layout.setSpacing(3)
+
+        box = QFrame()
+        box.setStyleSheet("background-color: #0e1117; border: 1px solid #1c202a; border-radius: 6px; padding: 6px;")
+        box_layout = QVBoxLayout(box)
+        box_layout.setContentsMargins(6, 4, 6, 4)
+        box_layout.setSpacing(2)
+
+        title = QLabel("Thông tin Tài khoản & Máy")
+        title.setStyleSheet("color: #d1d5db; font-size: 10px; font-weight: 700; font-family: 'Segoe UI', Arial; border-bottom: 1px solid #1f242d; padding-bottom: 3px; margin-bottom: 2px;")
+        box_layout.addWidget(title)
+
+        self.lbl_key = QLabel("LICENSE KEY: Đang tải...")
+        self.lbl_key.setStyleSheet("color: #60a5fa; font-size: 9.5px; font-weight: 700; font-family: 'Consolas', monospace;")
+        box_layout.addWidget(self.lbl_key)
+
+        self.lbl_hwid = QLabel(f"HWID: {CURRENT_HWID}")
+        self.lbl_hwid.setStyleSheet("color: #a1a1aa; font-size: 9px; font-family: 'Consolas', monospace;")
+        box_layout.addWidget(self.lbl_hwid)
+
+        self.lbl_ip = QLabel("IP: Đang tải...")
+        self.lbl_ip.setStyleSheet("color: #a1a1aa; font-size: 9px; font-family: 'Consolas', monospace;")
+        box_layout.addWidget(self.lbl_ip)
+
+        self.lbl_expiry = QLabel("Hạn Dùng: Đang tải...")
+        self.lbl_expiry.setStyleSheet("color: #00ff66; font-size: 9px; font-weight: bold; font-family: 'Segoe UI', Arial;")
+        box_layout.addWidget(self.lbl_expiry)
+
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setStyleSheet("color: #1f242d; margin: 2px 0;")
+        box_layout.addWidget(line)
+
+        self.lbl_version = QLabel(f"Phiên bản: {APP_VERSION}")
+        self.lbl_version.setStyleSheet("color: #9ca3af; font-size: 9px; font-family: 'Segoe UI', Arial;")
+        box_layout.addWidget(self.lbl_version)
+
+        self.lbl_updated_date = QLabel(f"Ngày cập nhật: {BUILD_DATE}")
+        self.lbl_updated_date.setStyleSheet("color: #9ca3af; font-size: 9px; font-family: 'Segoe UI', Arial;")
+        box_layout.addWidget(self.lbl_updated_date)
+
+        self.lbl_updated_time = QLabel(f"Giờ cập nhật: {BUILD_TIME}")
+        self.lbl_updated_time.setStyleSheet("color: #9ca3af; font-size: 9px; font-family: 'Segoe UI', Arial;")
+        box_layout.addWidget(self.lbl_updated_time)
+
+        self.lbl_user = QLabel(f"Username máy này: <span style='color:#00ff66; font-weight:bold;'>✔ {LOCAL_USERNAME}</span> (Đã xác nhận)")
+        self.lbl_user.setStyleSheet("color: #d1d5db; font-size: 9px; font-family: 'Segoe UI', Arial; margin-top: 2px;")
+        box_layout.addWidget(self.lbl_user)
+
+        layout.addWidget(box)
+        layout.addStretch()
+
+    def update_info(self):
+        curr_key = net_state.active_key or load_saved_key() or "KEY"
+        exp_at = net_state.key_expires_at
+        
+        if exp_at == -1:
+            role_badge = "<span style='color:#f59e0b; font-weight:800;'>[VIP]</span>"
+            time_str = "Vĩnh viễn"
+        elif exp_at > 0:
+            rem = max(0, exp_at - time.time())
+            days = int(rem // 86400)
+            hrs = int((rem % 86400) // 3600)
+            mins = int((rem % 3600) // 60)
+            
+            role_badge = "<span style='color:#f59e0b; font-weight:800;'>[VIP]</span>" if (rem > 86400 or days > 0) else "<span style='color:#60a5fa; font-weight:800;'>[FREE]</span>"
+            time_str = f"{days}d {hrs:02d}h {mins:02d}m" if days > 0 else f"{hrs:02d}h {mins:02d}m"
+        else:
+            role_badge = "<span style='color:#ef4444;'>[Hết hạn]</span>"
+            time_str = "Hết hạn"
+
+        self.lbl_key.setText(f"LICENSE KEY: {curr_key} {role_badge}")
+        self.lbl_ip.setText(f"IP của bạn: {net_state.cached_ip}")
+        self.lbl_expiry.setText(f"Thời hạn còn lại: {time_str}")
+
+class FeedbackChatTabPage(QWidget):
+    def __init__(self, parent_widget, parent=None):
+        super().__init__(parent)
+        self.parent_widget = parent_widget
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(4)
+
+        sub_tab_layout = QHBoxLayout()
+        sub_tab_layout.setSpacing(4)
+
+        self.btn_tab_fb = QPushButton("✉ Feedback")
+        self.btn_tab_chat = QPushButton("💬 Chat")
+        self.btn_tab_fb.setFixedHeight(24)
+        self.btn_tab_chat.setFixedHeight(24)
+        self.btn_tab_fb.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_tab_chat.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        self.btn_tab_fb.clicked.connect(lambda: self.switch_sub_tab(0))
+        self.btn_tab_chat.clicked.connect(lambda: self.switch_sub_tab(1))
+
+        sub_tab_layout.addWidget(self.btn_tab_fb)
+        sub_tab_layout.addWidget(self.btn_tab_chat)
+        layout.addLayout(sub_tab_layout)
+
+        self.sub_stack = QStackedWidget()
+        
+        # --- VIEW 1: FEEDBACK ---
+        fb_view = QWidget()
+        fb_layout = QVBoxLayout(fb_view)
+        fb_layout.setContentsMargins(0, 2, 0, 0)
+        fb_layout.setSpacing(4)
+
+        fb_title = QLabel("Gửi Phản Hồi & Báo Lỗi")
+        fb_title.setStyleSheet("color: #ffffff; font-size: 10px; font-weight: 700; font-family: 'Segoe UI', Arial;")
+        fb_layout.addWidget(fb_title)
+
+        tip_lbl = QLabel("💡 Panel sẽ tự động chụp màn hình game và gửi kèm lên Discord.")
+        tip_lbl.setWordWrap(True)
+        tip_lbl.setStyleSheet("color: #facc15; font-size: 8.8px; font-family: 'Segoe UI', Arial; background: rgba(234, 179, 8, 0.1); padding: 4px; border-radius: 4px;")
+        fb_layout.addWidget(tip_lbl)
+
+        note_title = QLabel("Ghi chú phản hồi (có thể bỏ trống):")
+        note_title.setStyleSheet("color: #9ca3af; font-size: 9px; font-family: 'Segoe UI', Arial;")
+        fb_layout.addWidget(note_title)
+
+        self.fb_input = QLineEdit()
+        self.fb_input.setPlaceholderText("Nhập ghi chú (tùy chọn)...")
+        self.fb_input.setFixedHeight(28)
+        self.fb_input.setStyleSheet("background-color: #12141a; border: 1px solid #1c202a; border-radius: 5px; color: #fff; font-size: 10px; padding: 0 6px;")
+        fb_layout.addWidget(self.fb_input)
+
+        self.send_fb_btn = QPushButton("📷 GỬI FEEDBACK")
+        self.send_fb_btn.setFixedHeight(30)
+        self.send_fb_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.send_fb_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #0284c7;
+                color: #ffffff;
+                border: none;
+                border-radius: 6px;
+                font-size: 10.5px;
+                font-weight: 800;
+                font-family: 'Consolas', sans-serif;
+            }
+            QPushButton:hover { background-color: #0369a1; }
+        """)
+        self.send_fb_btn.clicked.connect(self.handle_send_feedback)
+        fb_layout.addWidget(self.send_fb_btn)
+        fb_layout.addStretch()
+
+        # --- VIEW 2: CHAT ---
+        chat_view = QWidget()
+        chat_layout = QVBoxLayout(chat_view)
+        chat_layout.setContentsMargins(0, 2, 0, 0)
+        chat_layout.setSpacing(4)
+
+        chat_title = QLabel("Phòng Chat Trực Tuyến")
+        chat_title.setStyleSheet("color: #ffffff; font-size: 10px; font-weight: 700; font-family: 'Segoe UI', Arial;")
+        chat_layout.addWidget(chat_title)
+
+        self.chat_box = QTextEdit()
+        self.chat_box.setReadOnly(True)
+        self.chat_box.setStyleSheet("""
+            QTextEdit {
+                background-color: #11141a;
+                border: 1px solid #1c202a;
+                border-radius: 6px;
+                color: #d1d5db;
+                font-size: 9.5px;
+                font-family: 'Consolas', monospace;
+                padding: 4px;
+            }
+        """)
+        self.chat_box.append("<span style='color:#6b7280;'>[Hệ Thống] Chào mừng vào phòng chat!</span>")
+        chat_layout.addWidget(self.chat_box)
+
+        send_row = QHBoxLayout()
+        send_row.setSpacing(4)
+
+        self.chat_input = QLineEdit()
+        self.chat_input.setPlaceholderText("Nhập tin nhắn...")
+        self.chat_input.setFixedHeight(28)
+        self.chat_input.setStyleSheet("background-color: #12141a; border: 1px solid #1c202a; border-radius: 5px; color: #fff; font-size: 9.5px; padding: 0 6px;")
+        self.chat_input.returnPressed.connect(self.handle_send_chat)
+
+        self.send_chat_btn = QPushButton("✈ Gửi")
+        self.send_chat_btn.setFixedSize(50, 28)
+        self.send_chat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.send_chat_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #0284c7;
+                color: #ffffff;
+                border: none;
+                border-radius: 5px;
+                font-size: 10px;
+                font-weight: 800;
+            }
+            QPushButton:hover { background-color: #0369a1; }
+        """)
+        self.send_chat_btn.clicked.connect(self.handle_send_chat)
+
+        send_row.addWidget(self.chat_input)
+        send_row.addWidget(self.send_chat_btn)
+        chat_layout.addLayout(send_row)
+
+        self.sub_stack.addWidget(fb_view)
+        self.sub_stack.addWidget(chat_view)
+        layout.addWidget(self.sub_stack)
+
+        self.switch_sub_tab(0)
+
+    def switch_sub_tab(self, idx):
+        self.sub_stack.setCurrentIndex(idx)
+        style_active = "background-color: #0284c7; color: #fff; border: 1px solid #38bdf8; border-radius: 4px; font-size: 9.5px; font-weight: bold;"
+        style_inactive = "background-color: #0e1117; color: #9ca3af; border: 1px solid #27272a; border-radius: 4px; font-size: 9.5px;"
+        self.btn_tab_fb.setStyleSheet(style_active if idx == 0 else style_inactive)
+        self.btn_tab_chat.setStyleSheet(style_active if idx == 1 else style_inactive)
+
+    def get_role_tag(self):
+        exp_at = net_state.key_expires_at
+        if exp_at == -1 or (exp_at - time.time()) > 86400:
+            return "VIP"
+        return "FREE"
+
+    def handle_send_feedback(self):
+        msg = self.fb_input.text().strip() or "Không có ghi chú"
+        self.send_fb_btn.setText("ĐANG GỬI...")
+        self.send_fb_btn.setEnabled(False)
+        QApplication.processEvents()
+
+        def _send():
+            try:
+                screen = QGuiApplication.primaryScreen()
+                pixmap = screen.grabWindow(0)
+                byte_array = QBuffer()
+                byte_array.open(QIODevice.OpenModeFlag.WriteOnly)
+                pixmap.save(byte_array, "PNG")
+                img_data = byte_array.data().data()
+
+                role = self.get_role_tag()
+                payload = {
+                    "content": f"📢 **FEEDBACK TỪ [{role}] {LOCAL_USERNAME}**\n📝 **Nội dung:** {msg}\n💻 **HWID:** `{CURRENT_HWID}`\n🌐 **IP:** `{net_state.cached_ip}`"
+                }
+                files = {
+                    "file": ("screenshot.png", img_data, "image/png")
+                }
+                requests.post(DISCORD_WEBHOOK_URL, data=payload, files=files, timeout=8)
+            except Exception as e:
+                debug_log(f"Feedback error: {e}")
+            finally:
+                QTimer.singleShot(0, lambda: self._on_fb_sent())
+
+        threading.Thread(target=_send, daemon=True).start()
+
+    def _on_fb_sent(self):
+        self.send_fb_btn.setText("✔ ĐÃ GỬI THÀNH CÔNG")
+        self.fb_input.setText("")
+        QTimer.singleShot(2000, lambda: [self.send_fb_btn.setText("📷 GỬI FEEDBACK"), self.send_fb_btn.setEnabled(True)])
+
+    def handle_send_chat(self):
+        text = self.chat_input.text().strip()
+        if not text: return
+
+        role = self.get_role_tag()
+        curr_time_str = datetime.now().strftime("%H:%M")
+        color = "#f59e0b" if role == "VIP" else "#60a5fa"
+
+        chat_line = f"<span style='color:#6b7280;'>[{curr_time_str}]</span> <span style='color:{color}; font-weight:bold;'>[{role}]</span> <b>{LOCAL_USERNAME}:</b> {text}"
+        self.chat_box.append(chat_line)
+        self.chat_input.setText("")
+
+        def _send_chat():
+            try:
+                requests.post(DISCORD_WEBHOOK_URL, json={
+                    "content": f"💬 **[{role}] {LOCAL_USERNAME}**: {text}"
+                }, timeout=5)
+            except Exception:
+                pass
+
+        threading.Thread(target=_send_chat, daemon=True).start()
+
+# CONTAINER KEYBINDS & MENU TỔ ONG
 class KeybindsWidget(QWidget):
     def __init__(self, on_close_callback, parent=None):
         super().__init__(parent)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 6, 12, 8)
+        layout.setContentsMargins(10, 4, 10, 6)
         layout.setSpacing(4)
 
-        self.top_bar = TopBar("KEYBINDS", on_close=on_close_callback)
+        self.top_bar = TopBar("ZeroX", on_close=on_close_callback)
         layout.addWidget(self.top_bar)
+
+        # Nút chuyển đổi giữa Menu Tổ Ong và Panel Chi Tiết
+        self.btn_toggle_hub = QPushButton("⬡ Menu Tổ Ong")
+        self.btn_toggle_hub.setFixedHeight(22)
+        self.btn_toggle_hub.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_toggle_hub.setStyleSheet("""
+            QPushButton {
+                background-color: #161a24;
+                color: #38bdf8;
+                border: 1px solid #2e384d;
+                border-radius: 4px;
+                font-size: 9.5px;
+                font-weight: 700;
+                font-family: 'Segoe UI', Arial;
+            }
+            QPushButton:hover { background-color: #222838; border-color: #38bdf8; color: #fff; }
+        """)
+        self.btn_toggle_hub.clicked.connect(self.toggle_hub_view)
+        self.top_bar.tab_nav_layout.addWidget(self.btn_toggle_hub)
+
+        # Thông báo trạng thái bảo trì
+        self.maint_banner = QLabel("")
+        self.maint_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.maint_banner.setFixedHeight(18)
+        self.maint_banner.setStyleSheet("color: #ef4444; font-size: 9.5px; font-weight: bold; background: rgba(239, 68, 68, 0.12); border-radius: 3px;")
+        self.maint_banner.hide()
+        layout.addWidget(self.maint_banner)
+
+        # Stack quản lý các View
+        self.main_stack = QStackedWidget()
+
+        # VIEW 0: MENU TỔ ONG (HONEYCOMB HUB)
+        self.hub_view = QWidget()
+        hub_layout = QVBoxLayout(self.hub_view)
+        hub_layout.setContentsMargins(0, 0, 0, 0)
+        hub_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.honeycomb = HoneycombNavWidget(self)
+        self.honeycomb.tab_selected.connect(self.on_hex_tab_selected)
+        self.honeycomb.maintenance_clicked.connect(self.show_maintenance_warning)
+        hub_layout.addWidget(self.honeycomb)
+
+        # VIEW 1: PANEL CÁC TAB CHI TIẾT
+        self.detail_view = QWidget()
+        detail_layout = QVBoxLayout(self.detail_view)
+        detail_layout.setContentsMargins(0, 0, 0, 0)
 
         self.tab_stack = SlidingStackedWidget(self)
         self.main_page = MainTabPage(self)
         self.setting_page = SettingTabPage(self)
+        self.info_page = InfoTabPage(self)
+        self.feedback_page = FeedbackChatTabPage(self)
 
-        self.tab_stack.addWidget(self.main_page)
-        self.tab_stack.addWidget(self.setting_page)
-        layout.addWidget(self.tab_stack)
+        self.tab_stack.addWidget(self.main_page)     # 0: Fake Lag
+        self.tab_stack.addWidget(self.setting_page)  # 1: Setting
+        self.tab_stack.addWidget(self.info_page)     # 2: Info
+        self.tab_stack.addWidget(self.feedback_page) # 3: Feedback & Chat
+        detail_layout.addWidget(self.tab_stack)
 
-        tab_bar_layout = QHBoxLayout()
-        tab_bar_layout.setSpacing(6)
-        tab_bar_layout.setContentsMargins(4, 2, 4, 0)
+        self.main_stack.addWidget(self.hub_view)    # Index 0
+        self.main_stack.addWidget(self.detail_view) # Index 1
+        layout.addWidget(self.main_stack)
 
-        self.tab_main_btn = QPushButton("MAIN")
-        self.tab_main_btn.setFixedHeight(24)
-        self.tab_main_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-
-        self.tab_setting_btn = QPushButton("SETTING")
-        self.tab_setting_btn.setFixedHeight(24)
-        self.tab_setting_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-
-        self.tab_main_btn.clicked.connect(lambda: self.switch_tab(0))
-        self.tab_setting_btn.clicked.connect(lambda: self.switch_tab(1))
-
-        tab_bar_layout.addWidget(self.tab_main_btn)
-        tab_bar_layout.addWidget(self.tab_setting_btn)
-        layout.addLayout(tab_bar_layout)
-
-        self.update_tab_buttons(0)
+        # Mặc định mở Menu Tổ Ong đầu tiên
+        self.main_stack.setCurrentIndex(0)
 
         self.countdown_timer = QTimer(self)
         self.countdown_timer.timeout.connect(self.update_key_expiry_display)
 
-    def switch_tab(self, index: int):
-        self.update_tab_buttons(index)
-        self.tab_stack.slide_to_index(index)
+    def toggle_hub_view(self):
+        if self.main_stack.currentIndex() == 0:
+            self.main_stack.setCurrentIndex(1)
+            self.btn_toggle_hub.setText("⬡ Về Tổ Ong")
+        else:
+            self.main_stack.setCurrentIndex(0)
+            self.btn_toggle_hub.setText("📋 Xem Chi Tiết")
 
-    def update_tab_buttons(self, active_index: int):
-        style_active = """
-            QPushButton {
-                background-color: #1a202c;
-                color: #00ff66;
-                border: 1px solid #00ff66;
-                border-radius: 5px;
-                font-size: 10px;
-                font-weight: 800;
-                font-family: 'Consolas', 'Segoe UI', Arial;
-            }
-        """
-        style_inactive = """
-            QPushButton {
-                background-color: #0e1117;
-                color: #9ca3af;
-                border: 1px solid #27272a;
-                border-radius: 5px;
-                font-size: 10px;
-                font-weight: 700;
-                font-family: 'Consolas', 'Segoe UI', Arial;
-            }
-            QPushButton:hover {
-                background-color: #141821;
-                border-color: #3f3f46;
-                color: #ffffff;
-            }
-        """
-        self.tab_main_btn.setStyleSheet(style_active if active_index == 0 else style_inactive)
-        self.tab_setting_btn.setStyleSheet(style_active if active_index == 1 else style_inactive)
+    def on_hex_tab_selected(self, idx):
+        self.main_stack.setCurrentIndex(1)
+        self.btn_toggle_hub.setText("⬡ Về Tổ Ong")
+        if idx == 2:
+            self.info_page.update_info()
+        self.tab_stack.slide_to_index(idx)
+
+    def show_maintenance_warning(self, feature_name):
+        audio.beep(320, 100)
+        self.maint_banner.setText(f"🔒 Tính năng [{feature_name}] đang được BẢO TRÌ!")
+        self.maint_banner.show()
+        QTimer.singleShot(2500, self.maint_banner.hide)
 
     def start_timer(self):
         self.countdown_timer.start(1000)
@@ -1570,14 +2017,10 @@ class KeybindsWidget(QWidget):
                 mins = int((rem % 3600) // 60)
                 secs = int(rem % 60)
 
-                if days > 0:
-                    time_str = f"{days}d {hrs:02d}h {mins:02d}m {secs:02d}s"
-                else:
-                    time_str = f"{hrs:02d}h {mins:02d}m {secs:02d}s"
-
+                time_str = f"{days}d {hrs:02d}h {mins:02d}m {secs:02d}s" if days > 0 else f"{hrs:02d}h {mins:02d}m {secs:02d}s"
                 time_badge = f'<span style="color:#00ff66; font-weight:800; font-size:9.5px;">[{time_str}]</span>'
 
-        self.top_bar.title_lbl.setText(f"KEYBINDS {key_badge} {time_badge}")
+        self.top_bar.title_lbl.setText(f"{key_badge} {time_badge}")
 
 # ================= OVERLAYS & CONTAINER WINDOW =================
 class RainbowHeaderOverlay(QWidget):
@@ -1754,10 +2197,10 @@ class MainContainerWindow(QWidget):
         self.setWindowTitle(AntiBan.get_title())
         self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.resize(340, 255)
+        self.resize(360, 275)
 
         self.bg_frame = CustomParticleFrame(self)
-        self.bg_frame.setGeometry(0, 0, 340, 255)
+        self.bg_frame.setGeometry(0, 0, 360, 275)
 
         layout = QVBoxLayout(self.bg_frame)
         layout.setContentsMargins(0, 0, 0, 0)
