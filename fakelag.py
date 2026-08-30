@@ -68,7 +68,7 @@ LICENSE_FILE = "zerox_license.json"
 DISCORD_FEEDBACK_WEBHOOK = "https://discord.com/api/webhooks/1543470614025863308/SD9lOHs2pxJZFrdFFuYQMBOkKAF_6xgY8xetSagvXEU8fUc4O5e_jriDdIIbO1vylQrL"
 DISCORD_CHAT_WEBHOOK = "https://discord.com/api/webhooks/1543478594439880857/fNw9bdIjZP5-1dRfflPKlVLVPRJN4Qz67DZ-E31Y4ArDQGlVOS_M3XTDREOv7_VueEwn"
 
-APP_VERSION = "1.3.6"
+APP_VERSION = "1.3.7"
 BUILD_DATE = "30/08/2026"
 BUILD_TIME = "11:30:00"
 
@@ -467,9 +467,9 @@ def divert_freeze_fix_dame_worker():
             debug_log(f"Freeze fix divert error: {e}")
             time.sleep(0.05)
 
-# ================= TOGGLE CHỨC NĂNG (HOẠT ĐỘNG TOÀN CỤC Ở MỌI TAB) =================
+# ================= TOGGLE CHỨC NĂNG (CHỈ CHẠY ĐÚNG TAB 0) =================
 def toggle_freeze():
-    if not net_state.is_injected: return
+    if not net_state.is_injected or net_state.current_tab != 0: return
     with net_state.lock:
         if net_state.freeze_mode:
             net_state.freeze_mode = False
@@ -488,7 +488,7 @@ def toggle_freeze():
     signals.notify.emit('Freeze', active)
 
 def toggle_ghost():
-    if not net_state.is_injected: return
+    if not net_state.is_injected or net_state.current_tab != 0: return
     with net_state.lock:
         if net_state.ghost_mode:
             net_state.ghost_mode = False
@@ -503,7 +503,7 @@ def toggle_ghost():
     signals.notify.emit('Ghost', active)
 
 def toggle_tele():
-    if not net_state.is_injected: return
+    if not net_state.is_injected or net_state.current_tab != 0: return
     with net_state.lock:
         if net_state.tele_mode:
             net_state.tele_mode = False
@@ -518,7 +518,7 @@ def toggle_tele():
     signals.notify.emit('Telekill', active)
 
 def toggle_aimlag_arm():
-    if not net_state.is_injected: return
+    if not net_state.is_injected or net_state.current_tab != 0: return
     with net_state.lock:
         net_state.aimlag_armed = not net_state.aimlag_armed
         active = net_state.aimlag_armed
@@ -530,7 +530,7 @@ def toggle_aimlag_arm():
     signals.notify.emit('AimLag', active)
 
 def on_mouse_click(x, y, button, pressed):
-    if not net_state.is_authenticated or not net_state.is_injected:
+    if not net_state.is_authenticated or not net_state.is_injected or net_state.current_tab != 0:
         return
 
     if button == pynput_mouse.Button.left:
@@ -582,21 +582,22 @@ def hotkey_loop():
                 if is_freeze and f_time > 0 and (curr_t - f_time >= FREEZE_AUTO_DISABLE_SEC):
                     toggle_freeze()
 
-            cur_t = keyboard.is_pressed(app_config.tele_hotkey.key)
-            if cur_t and not tp: toggle_tele()
-            tp = cur_t
+            if net_state.current_tab == 0:
+                cur_t = keyboard.is_pressed(app_config.tele_hotkey.key)
+                if cur_t and not tp: toggle_tele()
+                tp = cur_t
 
-            cur_f = keyboard.is_pressed(app_config.freeze_hotkey.key)
-            if cur_f and not fp: toggle_freeze()
-            fp = cur_f
+                cur_f = keyboard.is_pressed(app_config.freeze_hotkey.key)
+                if cur_f and not fp: toggle_freeze()
+                fp = cur_f
 
-            cur_g = keyboard.is_pressed(app_config.ghost_hotkey.key)
-            if cur_g and not gp: toggle_ghost()
-            gp = cur_g
+                cur_g = keyboard.is_pressed(app_config.ghost_hotkey.key)
+                if cur_g and not gp: toggle_ghost()
+                gp = cur_g
 
-            cur_a = keyboard.is_pressed(app_config.aimlag_hotkey.key)
-            if cur_a and not ap: toggle_aimlag_arm()
-            ap = cur_a
+                cur_a = keyboard.is_pressed(app_config.aimlag_hotkey.key)
+                if cur_a and not ap: toggle_aimlag_arm()
+                ap = cur_a
 
             cur_h = keyboard.is_pressed(app_config.hide_hotkey.key)
             if cur_h and not hp: signals.toggle_visibility.emit()
@@ -678,7 +679,6 @@ class VectorHexagonButton(QWidget):
         s = r * 0.44
 
         if self.icon_type == 'network':
-            # Biểu tượng mạng (Network / Waves / Globe)
             p.drawEllipse(QPointF(cx, cy), s*0.8, s*0.8)
             p.drawLine(QPointF(cx - s*0.8, cy), QPointF(cx + s*0.8, cy))
             path.moveTo(cx, cy - s*0.8)
@@ -1020,7 +1020,7 @@ class InitialGuiWidget(QWidget):
         layout.setContentsMargins(14, 8, 14, 14)
         layout.setSpacing(10)
 
-        layout.addWidget(TopBar("GUI 1.0.6", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
+        layout.addWidget(TopBar("GUI 1.0.7", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
         layout.addSpacing(15)
 
         status_lbl = QLabel("Enable Inject Connect")
@@ -1824,7 +1824,7 @@ class FeedbackChatTabPage(QWidget):
         self.chat_box = QTextEdit()
         self.chat_box.setReadOnly(True)
         self.chat_box.setFixedHeight(85)
-        self.chat_box.setStyleSheet("background-color: #11141a; border: 1px solid #1c202a; border-radius: 5px; color: #d1d5db; font-size: 9px; font-family: 'Consolas', monospace; padding: 3px;")
+        self.chat_box.setStyleSheet("background-color: #11141a; border: 1px solid #1c202a; border-radius: 5px; color: #ffffff; font-size: 9px; font-family: 'Consolas', monospace; padding: 3px;")
         chat_layout.addWidget(self.chat_box)
 
         send_row = QHBoxLayout()
@@ -1899,8 +1899,11 @@ class FeedbackChatTabPage(QWidget):
                 col = "#f59e0b"
             else:
                 col = "#22c55e"
-            html_lines.append(f"<span style='color:#6b7280;'>[{t}]</span> <span style='color:{col}; font-weight:bold;'>[{role}]</span> <b>{user}:</b> {txt}")
+            html_lines.append(f"<span style='color:#6b7280;'>[{t}]</span> <span style='color:{col}; font-weight:bold;'>[{role}]</span> <b style='color:#ffffff;'>{user}:</b> <span style='color:#e2e8f0;'>{txt}</span>")
         
+        if not html_lines:
+            html_lines.append("<span style='color:#64748b;'>Chưa có tin nhắn nào...</span>")
+
         self.chat_box.setHtml("<br>".join(html_lines))
         self.chat_box.verticalScrollBar().setValue(self.chat_box.verticalScrollBar().maximum())
 
@@ -1926,8 +1929,9 @@ class FeedbackChatTabPage(QWidget):
 
         def _send():
             try:
+                # Cập nhật format chỉ hiển thị Tên và Ghi chú (không hiện key, ip, hwid) theo yêu cầu
                 payload = {
-                    "content": f"📢 **FEEDBACK TỪ [{role}] {user_name}**\n📝 **Nội dung:** {msg}\n💻 **HWID:** `{CURRENT_HWID}`\n🌐 **IP:** `{net_state.cached_ip}`"
+                    "content": f"📢 **FEEDBACK TỪ [{role}] {user_name}**\n👤 **Username:** `{user_name}`\n📝 **Ghi chú:** {msg}"
                 }
                 if img_data:
                     files = {"file": ("screenshot.png", img_data, "image/png")}
