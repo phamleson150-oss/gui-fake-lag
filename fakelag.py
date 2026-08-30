@@ -64,11 +64,14 @@ VPS_VERIFY_URL = f"{VPS_BASE_URL}/api/verify_key"
 VPS_CHAT_URL = f"{VPS_BASE_URL}/api/chat"
 GET_KEY_URL = f"{VPS_BASE_URL}/"
 LICENSE_FILE = "zerox_license.json"
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1543470614025863308/SD9lOHs2pxJZFrdFFuYQMBOkKAF_6xgY8xetSagvXEU8fUc4O5e_jriDdIIbO1vylQrL"
+
+# Webhooks Discord
+DISCORD_FEEDBACK_WEBHOOK = "https://discord.com/api/webhooks/1543470614025863308/SD9lOHs2pxJZFrdFFuYQMBOkKAF_6xgY8xetSagvXEU8fUc4O5e_jriDdIIbO1vylQrL"
+DISCORD_CHAT_WEBHOOK = "https://discord.com/api/webhooks/1543478594439880857/fNw9bdIjZP5-1dRfflPKlVLVPRJN4Qz67DZ-E31Y4ArDQGlVOS_M3XTDREOv7_VueEwn"
 
 APP_VERSION = "1.3.5"
 BUILD_DATE = "30/08/2026"
-BUILD_TIME = "11:20:00"
+BUILD_TIME = "11:30:00"
 
 def get_current_hwid():
     try:
@@ -324,7 +327,7 @@ class NetState:
         
         self.aimlag_armed = False
         self.mouse_held = False
-        self.current_tab = 0  # 0: Fake Lag, 1: Setting, 2: Info, 3: Feedback/Chat, 4: Coming Soon
+        self.current_tab = 0
 
         self.running = True
         self.is_authenticated = False
@@ -460,7 +463,7 @@ def divert_freeze_fix_dame_worker():
             debug_log(f"Freeze fix divert error: {e}")
             time.sleep(0.05)
 
-# ================= TOGGLE CÁC CHỨC NĂNG (CHỈ CHẠY ĐÚNG TAB 0) =================
+# ================= TOGGLE CHỨC NĂNG (CHỈ CHẠY ĐÚNG TAB 0) =================
 def toggle_freeze():
     if not net_state.is_injected or net_state.current_tab != 0: return
     with net_state.lock:
@@ -607,7 +610,7 @@ def hotkey_loop():
         except Exception:
             time.sleep(0.1)
 
-# ================= VECTOR HEXAGON BUTTON =================
+# ================= VECTOR HEXAGON BUTTON (TỰ VẼ BẰNG QPAINTER) =================
 class VectorHexagonButton(QWidget):
     clicked = pyqtSignal()
 
@@ -768,7 +771,6 @@ class TopLeftHoneycombOverlay(QWidget):
             btn.clicked.connect(lambda idx=target_idx: signals.open_tab_requested.emit(idx))
             self.hex_buttons[target_idx] = btn
 
-        # Cố định ở góc trên bên trái MÀN HÌNH (không dính vào game)
         self.move(20, 30)
 
         signals.stream_toggle.connect(lambda enabled: self.hide() if enabled else (self.show() if net_state.is_injected else None))
@@ -1512,93 +1514,6 @@ class KeyExpiredWidget(QWidget):
 
         layout.addLayout(btn_box)
 
-# ================= CONTAINER KEYBINDS & CÁC TAB =================
-class KeybindsWidget(QWidget):
-    def __init__(self, on_close_callback, parent=None):
-        super().__init__(parent)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 4, 10, 6)
-        layout.setSpacing(4)
-
-        self.top_bar = TopBar("ZeroX", on_close=on_close_callback)
-        layout.addWidget(self.top_bar)
-
-        self.tab_stack = SlidingStackedWidget(self)
-        self.main_page = MainTabPage(self)
-        self.setting_page = SettingTabPage(self)
-        self.info_page = InfoTabPage(self)
-        self.feedback_page = FeedbackChatTabPage(self)
-        self.coming_soon_page = ComingSoonTabPage(self)
-
-        self.tab_stack.addWidget(self.main_page)         # 0: Fake Lag
-        self.tab_stack.addWidget(self.setting_page)      # 1: Setting
-        self.tab_stack.addWidget(self.info_page)         # 2: Info
-        self.tab_stack.addWidget(self.feedback_page)     # 3: Feedback & Chat
-        self.tab_stack.addWidget(self.coming_soon_page)  # 4: Coming Soon (Bảo trì)
-        layout.addWidget(self.tab_stack)
-
-        self.countdown_timer = QTimer(self)
-        self.countdown_timer.timeout.connect(self.update_key_expiry_display)
-
-        signals.open_tab_requested.connect(self.switch_tab_direct)
-
-    def switch_tab_direct(self, index: int):
-        # Nếu đang bật lag mà chuyển sang tab khác thì tự ngắt lag để tránh lỗi
-        if net_state.current_tab == 0 and index != 0:
-            stop_all_features()
-        net_state.current_tab = index
-
-        if index == 2:
-            self.info_page.update_info()
-        self.tab_stack.slide_to_index(index)
-        QTimer.singleShot(210, self.adjust_panel_size)
-
-    def adjust_panel_size(self):
-        curr_idx = self.tab_stack.currentIndex()
-        h_map = {0: 175, 1: 175, 2: 220, 3: 205, 4: 160}
-        target_h = h_map.get(curr_idx, 180)
-        
-        if self.parentWidget() and hasattr(self.parentWidget(), 'resize'):
-            p = self.parentWidget().parentWidget() if hasattr(self.parentWidget(), 'parentWidget') else None
-            if p and hasattr(p, 'bg_frame'):
-                p.resize(300, target_h + 30)
-                p.bg_frame.setGeometry(0, 0, 300, target_h + 30)
-
-    def start_timer(self):
-        self.countdown_timer.start(1000)
-        self.update_key_expiry_display()
-
-    def stop_timer(self):
-        self.countdown_timer.stop()
-
-    def update_key_expiry_display(self):
-        exp_at = net_state.key_expires_at
-        curr_key = net_state.active_key or load_saved_key() or "KEY"
-
-        key_badge = f'<span style="color:#60a5fa; font-weight:700; font-size:9.5px;">[{curr_key}]</span>'
-
-        if exp_at == -1:
-            time_badge = '<span style="color:#00ff66; font-size:9.5px;">[Vĩnh viễn]</span>'
-        elif exp_at <= 0:
-            time_badge = ''
-        else:
-            rem = exp_at - time.time()
-            if rem <= 0:
-                self.countdown_timer.stop()
-                signals.key_expired.emit()
-                return
-            else:
-                days = int(rem // 86400)
-                hrs = int((rem % 86400) // 3600)
-                mins = int((rem % 3600) // 60)
-                secs = int(rem % 60)
-
-                time_str = f"{days}d {hrs:02d}h {mins:02d}m {secs:02d}s" if days > 0 else f"{hrs:02d}h {mins:02d}m {secs:02d}s"
-                time_badge = f'<span style="color:#00ff66; font-weight:800; font-size:9.5px;">[{time_str}]</span>'
-
-        self.top_bar.title_lbl.setText(f"{key_badge} {time_badge}")
-
 # ================= OVERLAYS & CONTAINER WINDOW =================
 class RainbowHeaderOverlay(QWidget):
     def __init__(self):
@@ -1857,8 +1772,6 @@ class MainContainerWindow(QWidget):
         self.keybinds_view.start_timer()
         self.stack.setCurrentIndex(5)
         self.keybinds_view.adjust_panel_size()
-        
-        # Chỉ khi chạy xong thanh Initializing System mới phát tín hiệu mở Menu Tổ Ong
         signals.show_honeycomb.emit()
 
     def handle_key_expired(self):
@@ -1920,7 +1833,7 @@ if __name__ == '__main__':
     main_win = MainContainerWindow()
     main_win.show()
 
-    # Menu Tổ Ong ở góc trên bên trái màn hình máy tính (bắt đầu ẩn cho đến khi Init xong)
+    # Menu Tổ Ong ở góc trên bên trái màn hình máy tính
     honeycomb_overlay = TopLeftHoneycombOverlay()
     signals.open_tab_requested.connect(honeycomb_overlay.update_active_node)
 
