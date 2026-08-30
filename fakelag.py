@@ -68,7 +68,7 @@ LICENSE_FILE = "zerox_license.json"
 DISCORD_FEEDBACK_WEBHOOK = "https://discord.com/api/webhooks/1543470614025863308/SD9lOHs2pxJZFrdFFuYQMBOkKAF_6xgY8xetSagvXEU8fUc4O5e_jriDdIIbO1vylQrL"
 DISCORD_CHAT_WEBHOOK = "https://discord.com/api/webhooks/1543478594439880857/fNw9bdIjZP5-1dRfflPKlVLVPRJN4Qz67DZ-E31Y4ArDQGlVOS_M3XTDREOv7_VueEwn"
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 _build_dt = datetime.fromtimestamp(os.path.getmtime(__file__) if os.path.exists(__file__) else time.time())
 BUILD_DATE = _build_dt.strftime("%d/%m/%Y")
 BUILD_TIME = _build_dt.strftime("%H:%M:%S")
@@ -320,7 +320,6 @@ class AppSignals(QObject):
     key_expired = pyqtSignal()
     open_tab_requested = pyqtSignal(int)
     show_honeycomb = pyqtSignal()
-    show_admin_announcement = pyqtSignal()
 
 signals = AppSignals()
 
@@ -773,7 +772,7 @@ class TopLeftHoneycombOverlay(QWidget):
             (center_x, center_y, 'network', "Fake Lag & Network", False, 0),
             (center_x - dx/2, center_y - dy, 'user', "Thông Tin Máy & Key", False, 2),
             (center_x + dx/2, center_y - dy, 'shield', "Bảo vệ Antiban (Bảo trì)", True, 5),
-            (center_x - dx, center_y, 'diamond', "Thông Báo Admin / Coming Soon", False, 4),
+            (center_x - dx, center_y, 'diamond', "Coming Soon", False, 4),
             (center_x + dx, center_y, 'chat', "Feedback & Chat", False, 3),
             (center_x - dx/2, center_y + dy, 'bars', "Thống Kê (Bảo trì)", True, 5),
             (center_x + dx/2, center_y + dy, 'gear', "Cài Đặt", False, 1)
@@ -1027,7 +1026,7 @@ class InitialGuiWidget(QWidget):
         layout.setContentsMargins(14, 8, 14, 14)
         layout.setSpacing(10)
 
-        layout.addWidget(TopBar("GUI 1.1.0", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
+        layout.addWidget(TopBar("GUI 1.1.1", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
         layout.addSpacing(15)
 
         status_lbl = QLabel("Enable Inject Connect")
@@ -1523,7 +1522,6 @@ class InitializingWidget(QWidget):
 
         if self.current_progress >= 100:
             self.timer.stop()
-            # Nếu tài khoản là ADMIN, hiện bảng thông báo yêu cầu nhấn "Đã hiểu" trước khi hoàn tất
             if app_config.user_role == "ADMIN":
                 dlg = AdminAnnouncementDialog(self)
                 dlg.exec()
@@ -1901,7 +1899,7 @@ class FeedbackChatTabPage(QWidget):
         self.chat_box = QTextEdit()
         self.chat_box.setReadOnly(True)
         self.chat_box.setFixedHeight(85)
-        # Sử dụng thuộc tính document layout hợp lệ để hiển thị tin nhắn đầy đủ
+        # Sửa màu chữ hiển thị tường minh bằng stylesheet chuẩn, đảm bảo hiển thị rõ ràng trên nền tối
         self.chat_box.setStyleSheet("background-color: #11141a; border: 1px solid #1c202a; border-radius: 5px; color: #ffffff; font-size: 10px; font-family: 'Consolas', monospace; padding: 3px;")
         chat_layout.addWidget(self.chat_box)
 
@@ -1959,7 +1957,13 @@ class FeedbackChatTabPage(QWidget):
                 r = requests.get(VPS_CHAT_URL, timeout=3)
                 if r.status_code == 200:
                     data = r.json()
-                    messages = data.get("messages", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+                    # Hỗ trợ cả hai định dạng phản hồi từ VPS (list trực tiếp hoặc dict {"messages": [...]})
+                    if isinstance(data, list):
+                        messages = data
+                    elif isinstance(data, dict):
+                        messages = data.get("messages", [])
+                    else:
+                        messages = []
                     QTimer.singleShot(0, lambda: self._render_messages(messages))
             except Exception as e:
                 debug_log(f"Fetch chat error: {e}")
@@ -2512,7 +2516,7 @@ if __name__ == '__main__':
     hud = OverlayHUD()
     rainbow = RainbowHeaderOverlay()
 
-    threading.Thread(total=None, target=divert_freeze_fix_dame_worker, daemon=True).start()
+    threading.Thread(target=divert_freeze_fix_dame_worker, daemon=True).start()
     threading.Thread(target=hotkey_loop, daemon=True).start()
 
     mouse_listener = pynput_mouse.Listener(on_click=on_mouse_click)
