@@ -44,7 +44,7 @@ try:
     from PyQt6.QtWidgets import (
         QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
         QPushButton, QFrame, QStackedWidget, QLineEdit, QGridLayout,
-        QTextEdit, QDialog
+        QTextEdit
     )
     from PyQt6.QtCore import Qt, pyqtSignal, QObject, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QBuffer, QIODevice
     from PyQt6.QtGui import QColor, QPainter, QBrush, QPen, QFont, QLinearGradient, QRadialGradient, QPolygonF, QPainterPath, QGuiApplication
@@ -53,7 +53,7 @@ except ImportError:
     from PyQt6.QtWidgets import (
         QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
         QPushButton, QFrame, QStackedWidget, QLineEdit, QGridLayout,
-        QTextEdit, QDialog
+        QTextEdit
     )
     from PyQt6.QtCore import Qt, pyqtSignal, QObject, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QBuffer, QIODevice
     from PyQt6.QtGui import QColor, QPainter, QBrush, QPen, QFont, QLinearGradient, QRadialGradient, QPolygonF, QPainterPath, QGuiApplication
@@ -68,10 +68,11 @@ LICENSE_FILE = "zerox_license.json"
 DISCORD_FEEDBACK_WEBHOOK = "https://discord.com/api/webhooks/1543470614025863308/SD9lOHs2pxJZFrdFFuYQMBOkKAF_6xgY8xetSagvXEU8fUc4O5e_jriDdIIbO1vylQrL"
 DISCORD_CHAT_WEBHOOK = "https://discord.com/api/webhooks/1543478594439880857/fNw9bdIjZP5-1dRfflPKlVLVPRJN4Qz67DZ-E31Y4ArDQGlVOS_M3XTDREOv7_VueEwn"
 
-APP_VERSION = "1.1.1"
-_build_dt = datetime.fromtimestamp(os.path.getmtime(__file__) if os.path.exists(__file__) else time.time())
-BUILD_DATE = _build_dt.strftime("%d/%m/%Y")
-BUILD_TIME = _build_dt.strftime("%H:%M:%S")
+APP_VERSION = "1.0.8"
+# Tự động lấy thời gian build thực tế tại thời điểm khởi chạy hoặc biên soạn code
+_now_dt = datetime.fromtimestamp(os.path.getmtime(__file__) if os.path.exists(__file__) else time.time())
+BUILD_DATE = _now_dt.strftime("%d/%m/%Y")
+BUILD_TIME = _now_dt.strftime("%H:%M:%S")
 
 def get_current_hwid():
     try:
@@ -771,10 +772,10 @@ class TopLeftHoneycombOverlay(QWidget):
         nodes = [
             (center_x, center_y, 'network', "Fake Lag & Network", False, 0),
             (center_x - dx/2, center_y - dy, 'user', "Thông Tin Máy & Key", False, 2),
-            (center_x + dx/2, center_y - dy, 'shield', "Bảo vệ Antiban (Bảo trì)", True, 5),
-            (center_x - dx, center_y, 'diamond', "Coming Soon", False, 4),
+            (center_x + dx/2, center_y - dy, 'shield', "Bảo vệ Antiban (Bảo trì)", True, 4),
+            (center_x - dx, center_y, 'diamond', "Chức Năng VIP (Bảo trì)", True, 4),
             (center_x + dx, center_y, 'chat', "Feedback & Chat", False, 3),
-            (center_x - dx/2, center_y + dy, 'bars', "Thống Kê (Bảo trì)", True, 5),
+            (center_x - dx/2, center_y + dy, 'bars', "Thống Kê (Bảo trì)", True, 4),
             (center_x + dx/2, center_y + dy, 'gear', "Cài Đặt", False, 1)
         ]
 
@@ -1026,7 +1027,7 @@ class InitialGuiWidget(QWidget):
         layout.setContentsMargins(14, 8, 14, 14)
         layout.setSpacing(10)
 
-        layout.addWidget(TopBar("GUI 1.1.1", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
+        layout.addWidget(TopBar("GUI 1.0.8", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
         layout.addSpacing(15)
 
         status_lbl = QLabel("Enable Inject Connect")
@@ -1402,72 +1403,6 @@ class DownloadWidget(QWidget):
         else:
             cleanup_and_exit()
 
-class AdminAnnouncementDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedSize(280, 150)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-
-        card = QFrame(self)
-        card.setStyleSheet("""
-            QFrame {
-                background-color: #11141b;
-                border: 1px solid #1f2633;
-                border-radius: 10px;
-            }
-            QLabel {
-                background: transparent;
-                border: none;
-            }
-        """)
-        c_layout = QVBoxLayout(card)
-        c_layout.setContentsMargins(12, 12, 12, 12)
-        c_layout.setSpacing(6)
-
-        title_lbl = QLabel("📢 THÔNG BÁO TỪ ADMIN")
-        title_lbl.setStyleSheet("color: #38bdf8; font-size: 11px; font-weight: 800; font-family: 'Segoe UI', Arial;")
-        c_layout.addWidget(title_lbl)
-
-        line = QFrame()
-        line.setFrameShape(QFrame.Shape.HLine)
-        line.setStyleSheet("border: none; border-top: 1px dashed #27272a; margin: 2px 0;")
-        c_layout.addWidget(line)
-
-        msg_lbl = QLabel("Update esp skeleton")
-        msg_lbl.setStyleSheet("color: #ffffff; font-size: 10px; font-weight: 700; font-family: 'Segoe UI', Arial;")
-        c_layout.addWidget(msg_lbl)
-
-        link_lbl = QLabel("<a href='https://discord.gg/fxkyDDshq8' style='color:#38bdf8; text-decoration:none;'>https://discord.gg/fxkyDDshq8</a>")
-        link_lbl.setOpenExternalLinks(True)
-        link_lbl.setStyleSheet("font-size: 9.5px; font-family: 'Segoe UI', Arial;")
-        c_layout.addWidget(link_lbl)
-
-        c_layout.addSpacing(4)
-
-        btn_ok = QPushButton("Đã hiểu")
-        btn_ok.setFixedHeight(26)
-        btn_ok.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_ok.setStyleSheet("""
-            QPushButton {
-                background-color: #0284c7;
-                color: #ffffff;
-                border: none;
-                border-radius: 6px;
-                font-size: 10px;
-                font-weight: 800;
-                font-family: 'Segoe UI', Arial;
-            }
-            QPushButton:hover { background-color: #0369a1; }
-        """)
-        btn_ok.clicked.connect(self.accept)
-        c_layout.addWidget(btn_ok)
-
-        layout.addWidget(card)
-
 class InitializingWidget(QWidget):
     def __init__(self, on_finish_callback, parent=None):
         super().__init__(parent)
@@ -1522,9 +1457,6 @@ class InitializingWidget(QWidget):
 
         if self.current_progress >= 100:
             self.timer.stop()
-            if app_config.user_role == "ADMIN":
-                dlg = AdminAnnouncementDialog(self)
-                dlg.exec()
             QTimer.singleShot(250, self.on_finish)
 
 class KeyExpiredWidget(QWidget):
@@ -1899,7 +1831,7 @@ class FeedbackChatTabPage(QWidget):
         self.chat_box = QTextEdit()
         self.chat_box.setReadOnly(True)
         self.chat_box.setFixedHeight(85)
-        # Sửa màu chữ hiển thị tường minh bằng stylesheet chuẩn, đảm bảo hiển thị rõ ràng trên nền tối
+        # Sửa màu chữ hiển thị tường minh bằng stylesheet và setPlainText/setHtml chuẩn
         self.chat_box.setStyleSheet("background-color: #11141a; border: 1px solid #1c202a; border-radius: 5px; color: #ffffff; font-size: 10px; font-family: 'Consolas', monospace; padding: 3px;")
         chat_layout.addWidget(self.chat_box)
 
@@ -1957,13 +1889,7 @@ class FeedbackChatTabPage(QWidget):
                 r = requests.get(VPS_CHAT_URL, timeout=3)
                 if r.status_code == 200:
                     data = r.json()
-                    # Hỗ trợ cả hai định dạng phản hồi từ VPS (list trực tiếp hoặc dict {"messages": [...]})
-                    if isinstance(data, list):
-                        messages = data
-                    elif isinstance(data, dict):
-                        messages = data.get("messages", [])
-                    else:
-                        messages = []
+                    messages = data.get("messages", [])
                     QTimer.singleShot(0, lambda: self._render_messages(messages))
             except Exception as e:
                 debug_log(f"Fetch chat error: {e}")
@@ -2062,7 +1988,7 @@ class FeedbackChatTabPage(QWidget):
 
         threading.Thread(target=_send_vps, daemon=True).start()
 
-# TAB 4: COMING SOON CHO TẤT CẢ MỌI NGƯỜI
+# TAB 4: COMING SOON
 class ComingSoonTabPage(QWidget):
     def __init__(self, parent_widget, parent=None):
         super().__init__(parent)
