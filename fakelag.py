@@ -9,6 +9,7 @@ import winsound
 import json
 import random
 import html
+import re
 import subprocess
 import urllib.parse
 import webbrowser
@@ -63,6 +64,7 @@ except ImportError:
 VPS_BASE_URL = "http://103.78.3.222:53689"
 VPS_VERIFY_URL = f"{VPS_BASE_URL}/api/verify_key"
 VPS_CHAT_URL = f"{VPS_BASE_URL}/api/chat"
+VPS_ANNOUNCE_URL = f"{VPS_BASE_URL}/api/announcement"
 GET_KEY_URL = f"{VPS_BASE_URL}/"
 LICENSE_FILE = "zerox_license.json"
 
@@ -1458,6 +1460,70 @@ class InitializingWidget(QWidget):
             self.timer.stop()
             QTimer.singleShot(250, self.on_finish)
 
+# ================= POPUP THÔNG BÁO TỪ ADMIN =================
+class AdminNoticeWidget(QWidget):
+    def __init__(self, on_understood_callback, on_close_callback, parent=None):
+        super().__init__(parent)
+        self.on_understood = on_understood_callback
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 10, 14, 14)
+        layout.setSpacing(6)
+
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(6)
+        
+        self.header_title = QLabel("📢 THÔNG BÁO TỪ ADMIN")
+        self.header_title.setStyleSheet("color: #ffffff; font-size: 11.5px; font-weight: 900; font-family: 'Consolas', 'Segoe UI', sans-serif; letter-spacing: 0.8px;")
+        header_row.addWidget(self.header_title)
+        header_row.addStretch()
+        layout.addLayout(header_row)
+
+        dash_line = QFrame()
+        dash_line.setFrameShape(QFrame.Shape.HLine)
+        dash_line.setStyleSheet("border: none; border-top: 1px dashed rgba(255, 255, 255, 0.2); margin: 1px 0;")
+        layout.addWidget(dash_line)
+
+        self.content_lbl = QLabel("Đang tải thông báo...")
+        self.content_lbl.setWordWrap(True)
+        self.content_lbl.setOpenExternalLinks(True)
+        self.content_lbl.setStyleSheet("color: #d1d5db; font-size: 10.5px; font-family: 'Segoe UI', Arial; font-weight: 500; padding: 4px 0;")
+        layout.addWidget(self.content_lbl)
+
+        layout.addStretch()
+
+        self.btn_understood = QPushButton("Đã hiểu")
+        self.btn_understood.setFixedHeight(34)
+        self.btn_understood.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_understood.setStyleSheet("""
+            QPushButton {
+                background-color: #0099ff;
+                color: #ffffff;
+                border: none;
+                border-radius: 6px;
+                font-size: 12px;
+                font-weight: 800;
+                font-family: 'Consolas', 'Segoe UI', sans-serif;
+            }
+            QPushButton:hover {
+                background-color: #0080e6;
+            }
+        """)
+        self.btn_understood.clicked.connect(self.on_understood)
+        layout.addWidget(self.btn_understood)
+
+    def set_notice(self, title_text, raw_content):
+        if title_text:
+            self.header_title.setText(f"📢 {title_text}")
+        
+        # Tự động chuyển đổi link URL thành thẻ <a href> xanh dương có thể click
+        formatted_html = html.escape(raw_content).replace("\n", "<br>")
+        url_pattern = re.compile(r'(https?://[^\s<]+)')
+        formatted_html = url_pattern.sub(r'<a href="\1" style="color: #38bdf8; text-decoration: none; font-weight: 600;">\1</a>', formatted_html)
+
+        self.content_lbl.setText(f"<div style='line-height: 1.4;'>{formatted_html}</div>")
+
 class KeyExpiredWidget(QWidget):
     def __init__(self, on_relogin_callback, on_close_callback, parent=None):
         super().__init__(parent)
@@ -1748,7 +1814,7 @@ class InfoTabPage(QWidget):
         self.lbl_expiry.setText(f"Thời hạn còn lại: {time_str}")
         self.lbl_user.setText(f"Tên hiển thị: <span style='color:#22c55e; font-weight:bold;'>✔ {app_config.custom_nickname}</span>")
 
-# TAB 3: FEEDBACK & CHAT (ĐÃ FIX KHÔNG HIỂN THỊ CHAT)
+# TAB 3: FEEDBACK & CHAT (ĐÃ SỬA HIỂN THỊ ĐẦY ĐỦ THỜI GIAN, NGÀY, ROLE, USER)
 class FeedbackChatTabPage(QWidget):
     def __init__(self, parent_widget, parent=None):
         super().__init__(parent)
@@ -1821,7 +1887,7 @@ class FeedbackChatTabPage(QWidget):
         self.send_fb_btn.clicked.connect(self.handle_send_feedback)
         fb_layout.addWidget(self.send_fb_btn)
 
-        # VIEW 2: CHAT TRỰC TIẾP VPS + DISCORD
+        # VIEW 2: CHAT TRỰC TIẾP
         chat_view = QWidget()
         chat_layout = QVBoxLayout(chat_view)
         chat_layout.setContentsMargins(0, 2, 0, 0)
@@ -1831,6 +1897,7 @@ class FeedbackChatTabPage(QWidget):
         self.chat_box.setReadOnly(True)
         self.chat_box.setFixedHeight(85)
         self.chat_box.setStyleSheet("background-color: #11141a; border: 1px solid #1c202a; border-radius: 5px; color: #ffffff; font-size: 10px; font-family: 'Consolas', monospace; padding: 3px;")
+        self.chat_box.setHtml("<div style='color:#94a3b8; font-style:italic;'>Đang kết nối chat server...</div>")
         chat_layout.addWidget(self.chat_box)
 
         send_row = QHBoxLayout()
@@ -1856,6 +1923,7 @@ class FeedbackChatTabPage(QWidget):
         self.sub_stack.addWidget(chat_view)
         layout.addWidget(self.sub_stack)
 
+        self.cached_messages = []
         self.switch_sub_tab(0)
 
         self.chat_timer = QTimer(self)
@@ -1888,6 +1956,7 @@ class FeedbackChatTabPage(QWidget):
                 if r.status_code == 200:
                     data = r.json()
                     messages = data.get("messages", [])
+                    self.cached_messages = messages
                     QTimer.singleShot(0, lambda: self._render_messages(messages))
             except Exception as e:
                 debug_log(f"Fetch chat error: {e}")
@@ -1897,7 +1966,7 @@ class FeedbackChatTabPage(QWidget):
         html_lines = []
         if isinstance(messages, list):
             for m in messages:
-                t = html.escape(str(m.get("time", "00:00")))
+                t = html.escape(str(m.get("time", datetime.now().strftime("%d/%m %H:%M"))))
                 role = html.escape(str(m.get("role", "FREE")))
                 user = html.escape(str(m.get("user", "User")))
                 txt = html.escape(str(m.get("text", "")))
@@ -1908,7 +1977,7 @@ class FeedbackChatTabPage(QWidget):
                     col = "#f59e0b"
                 else:
                     col = "#22c55e"
-                html_lines.append(f"<div style='margin-bottom: 3px;'><span style='color:#9ca3af;'>[{t}]</span> <span style='color:{col}; font-weight:bold;'>[{role}]</span> <b style='color:#ffffff;'>{user}:</b> <span style='color:#f1f5f9;'>{txt}</span></div>")
+                html_lines.append(f"<div style='margin-bottom: 3px;'><span style='color:#9ca3af; font-size: 8.5px;'>[{t}]</span> <span style='color:{col}; font-weight:bold;'>[{role}]</span> <b style='color:#38bdf8;'>{user}:</b> <span style='color:#f1f5f9;'>{txt}</span></div>")
         
         if not html_lines:
             html_lines.append("<div style='color:#94a3b8; font-style:italic;'>Chưa có tin nhắn nào...</div>")
@@ -1970,6 +2039,15 @@ class FeedbackChatTabPage(QWidget):
         user_name = app_config.custom_nickname
         self.chat_input.setText("")
 
+        local_msg = {
+            "time": datetime.now().strftime("%d/%m %H:%M"),
+            "role": role,
+            "user": user_name,
+            "text": text
+        }
+        self.cached_messages.append(local_msg)
+        self._render_messages(self.cached_messages)
+
         def _send_vps():
             try:
                 r = requests.post(VPS_CHAT_URL, json={
@@ -1980,9 +2058,10 @@ class FeedbackChatTabPage(QWidget):
                 if r.status_code == 200:
                     data = r.json()
                     if "messages" in data:
-                        QTimer.singleShot(0, lambda: self._render_messages(data["messages"]))
+                        self.cached_messages = data["messages"]
+                        QTimer.singleShot(0, lambda: self._render_messages(self.cached_messages))
             except Exception as e:
-                debug_log(f"Send chat error: {e}")
+                debug_log(f"Send chat VPS error: {e}")
             finally:
                 self.fetch_vps_chat()
 
@@ -2319,6 +2398,7 @@ class MainContainerWindow(QWidget):
         self.login_view = LoginWidget(self.on_login_success, cleanup_and_exit, self.showMinimized)
         self.download_view = DownloadWidget(self.on_inject_clicked, cleanup_and_exit)
         self.init_view = InitializingWidget(self.on_init_finished)
+        self.notice_view = AdminNoticeWidget(self.on_notice_understood, cleanup_and_exit)
         self.keybinds_view = KeybindsWidget(cleanup_and_exit)
         self.expired_view = KeyExpiredWidget(self.on_expired_relogin, cleanup_and_exit)
 
@@ -2327,8 +2407,9 @@ class MainContainerWindow(QWidget):
         self.stack.addWidget(self.login_view)          # 2
         self.stack.addWidget(self.download_view)       # 3
         self.stack.addWidget(self.init_view)           # 4
-        self.stack.addWidget(self.keybinds_view)       # 5
-        self.stack.addWidget(self.expired_view)        # 6
+        self.stack.addWidget(self.notice_view)         # 5
+        self.stack.addWidget(self.keybinds_view)       # 6
+        self.stack.addWidget(self.expired_view)        # 7
 
         self.stack.setCurrentIndex(0)
 
@@ -2381,11 +2462,38 @@ class MainContainerWindow(QWidget):
         self.init_view.start()
 
     def on_init_finished(self):
+        # Lấy thông báo Admin từ VPS trước khi vào menu Fake lag
+        def _fetch_notice():
+            notice_title = "THÔNG BÁO TỪ ADMIN"
+            notice_content = "Update esp skeleton\nhttps://discord.gg/fxkyDDshq8"
+            show_popup = True
+            try:
+                r = requests.get(VPS_ANNOUNCE_URL, timeout=3)
+                if r.status_code == 200:
+                    data = r.json().get("data", {})
+                    notice_title = data.get("title", notice_title)
+                    notice_content = data.get("content", notice_content)
+                    show_popup = data.get("enabled", True)
+            except Exception:
+                pass
+
+            if show_popup:
+                QTimer.singleShot(0, lambda: self._display_admin_notice(notice_title, notice_content))
+            else:
+                QTimer.singleShot(0, self.on_notice_understood)
+
+        threading.Thread(target=_fetch_notice, daemon=True).start()
+
+    def _display_admin_notice(self, title_txt, content_txt):
+        self.notice_view.set_notice(title_txt, content_txt)
+        self.stack.setCurrentIndex(5)
+
+    def on_notice_understood(self):
         net_state.is_injected = True
         self.keybinds_view.update_key_expiry_display()
         self.keybinds_view.setting_page.update_all_buttons()
         self.keybinds_view.start_timer()
-        self.stack.setCurrentIndex(5)
+        self.stack.setCurrentIndex(6)
         self.keybinds_view.adjust_panel_size()
         signals.show_honeycomb.emit()
 
@@ -2400,7 +2508,7 @@ class MainContainerWindow(QWidget):
             self.show()
         self.raise_()
         self.activateWindow()
-        self.stack.setCurrentIndex(6)
+        self.stack.setCurrentIndex(7)
 
     def on_expired_relogin(self):
         self.login_view.status_msg.setText("")
