@@ -68,9 +68,9 @@ LICENSE_FILE = "zerox_license.json"
 DISCORD_FEEDBACK_WEBHOOK = "https://discord.com/api/webhooks/1543470614025863308/SD9lOHs2pxJZFrdFFuYQMBOkKAF_6xgY8xetSagvXEU8fUc4O5e_jriDdIIbO1vylQrL"
 DISCORD_CHAT_WEBHOOK = "https://discord.com/api/webhooks/1543478594439880857/fNw9bdIjZP5-1dRfflPKlVLVPRJN4Qz67DZ-E31Y4ArDQGlVOS_M3XTDREOv7_VueEwn"
 
-APP_VERSION = "1.3.6"
+APP_VERSION = "1.3.7"
 BUILD_DATE = "30/08/2026"
-BUILD_TIME = "11:55:00"
+BUILD_TIME = "12:10:00"
 
 def get_current_hwid():
     try:
@@ -463,7 +463,7 @@ def divert_freeze_fix_dame_worker():
             debug_log(f"Freeze fix divert error: {e}")
             time.sleep(0.05)
 
-# ================= TOGGLE CHỨC NĂNG (CHO PHÉP BẬT NHIỀU TAB/CHỨC NĂNG CÙNG LÚC) =================
+# ================= TOGGLE CHỨC NĂNG =================
 def toggle_freeze():
     if not net_state.is_injected: return
     with net_state.lock:
@@ -673,7 +673,18 @@ class VectorHexagonButton(QWidget):
         path = QPainterPath()
         s = r * 0.44
 
-        if self.icon_type == 'target':
+        if self.icon_type == 'network':
+            # Vẽ icon mạng / sóng (Network icon) ở giữa
+            p.drawEllipse(QPointF(cx, cy + s*0.5), s*0.2, s*0.2)
+            path.moveTo(cx - s*0.6, cy)
+            path.arcTo(QRectF(cx - s*0.6, cy - s*0.6, s*1.2, s*1.2), 45, 90)
+            p.drawPath(path)
+            path2 = QPainterPath()
+            path2.moveTo(cx - s*0.9, cy - s*0.3)
+            path2.arcTo(QRectF(cx - s*0.9, cy - s*0.9, s*1.8, s*1.8), 45, 90)
+            p.drawPath(path2)
+
+        elif self.icon_type == 'target':
             p.drawEllipse(QPointF(cx, cy), s*0.85, s*0.85)
             p.drawEllipse(QPointF(cx, cy), s*0.35, s*0.35)
             p.drawLine(QPointF(cx - s*1.15, cy), QPointF(cx - s*0.5, cy))
@@ -755,7 +766,7 @@ class TopLeftHoneycombOverlay(QWidget):
         self.hex_buttons = {}
 
         nodes = [
-            (center_x, center_y, 'target', "Fake Lag (Bấm mở Menu)", False, 0),
+            (center_x, center_y, 'network', "Fake Lag (Bấm mở Menu)", False, 0),
             (center_x - dx/2, center_y - dy, 'user', "Thông Tin Máy & Key", False, 2),
             (center_x + dx/2, center_y - dy, 'shield', "Bảo vệ Antiban (Bảo trì)", True, 4),
             (center_x - dx, center_y, 'diamond', "Chức Năng VIP (Bảo trì)", True, 4),
@@ -1465,7 +1476,7 @@ class KeyExpiredWidget(QWidget):
         title_lbl.setStyleSheet("color: #ef4444; font-size: 12px; font-weight: 800; font-family: 'Segoe UI', Arial;")
         layout.addWidget(title_lbl)
 
-        sub_lbl = QLabel("Hệ thống đã tự động ng tắt toàn bộ Fake Lag.\nVui lòng gia hạn hoặc lấy key mới để tiếp tục.")
+        sub_lbl = QLabel("Hệ thống đã tự động ngắt toàn bộ Fake Lag.\nVui lòng gia hạn hoặc lấy key mới để tiếp tục.")
         sub_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sub_lbl.setStyleSheet("color: #9ca3af; font-size: 10px; font-weight: 500; font-family: 'Segoe UI', Arial;")
         layout.addWidget(sub_lbl)
@@ -2381,7 +2392,7 @@ class MainContainerWindow(QWidget):
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
             self._drag = True
-            self._pos = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            self._pos = e.globalPosition().toPoint() - self.keybinds_view.frameGeometry().topLeft() if hasattr(self, 'keybinds_view') else e.globalPosition().toPoint() - self.frameGeometry().topLeft()
             e.accept()
 
     def mouseMoveEvent(self, e):
