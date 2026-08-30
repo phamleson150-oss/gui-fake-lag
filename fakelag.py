@@ -70,7 +70,7 @@ DISCORD_CHAT_WEBHOOK = "https://discord.com/api/webhooks/1543478594439880857/fNw
 
 APP_VERSION = "1.0.7"
 BUILD_DATE = "30/08/2026"
-BUILD_TIME = "11:30:00"
+BUILD_TIME = "1:00:10"
 
 def get_current_hwid():
     try:
@@ -1020,7 +1020,7 @@ class InitialGuiWidget(QWidget):
         layout.setContentsMargins(14, 8, 14, 14)
         layout.setSpacing(10)
 
-        layout.addWidget(TopBar("GUI 1.0.7", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
+        layout.addWidget(TopBar("GUI 1.0.8", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
         layout.addSpacing(15)
 
         status_lbl = QLabel("Enable Inject Connect")
