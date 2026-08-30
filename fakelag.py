@@ -69,8 +69,10 @@ DISCORD_FEEDBACK_WEBHOOK = "https://discord.com/api/webhooks/1543470614025863308
 DISCORD_CHAT_WEBHOOK = "https://discord.com/api/webhooks/1543478594439880857/fNw9bdIjZP5-1dRfflPKlVLVPRJN4Qz67DZ-E31Y4ArDQGlVOS_M3XTDREOv7_VueEwn"
 
 APP_VERSION = "1.0.8"
-BUILD_DATE = datetime.now().strftime("%d/%m/%Y")
-BUILD_TIME = datetime.now().strftime("%H:%M:%S")
+# Tự động lấy thời gian build thực tế tại thời điểm khởi chạy hoặc biên soạn code
+_now_dt = datetime.fromtimestamp(os.path.getmtime(__file__) if os.path.exists(__file__) else time.time())
+BUILD_DATE = _now_dt.strftime("%d/%m/%Y")
+BUILD_TIME = _now_dt.strftime("%H:%M:%S")
 
 def get_current_hwid():
     try:
@@ -1829,7 +1831,8 @@ class FeedbackChatTabPage(QWidget):
         self.chat_box = QTextEdit()
         self.chat_box.setReadOnly(True)
         self.chat_box.setFixedHeight(85)
-        self.chat_box.setStyleSheet("background-color: #11141a; border: 1px solid #1c202a; border-radius: 5px; color: #ffffff; font-size: 9px; font-family: 'Consolas', monospace; padding: 3px;")
+        # Sửa màu chữ hiển thị tường minh bằng stylesheet và setPlainText/setHtml chuẩn
+        self.chat_box.setStyleSheet("background-color: #11141a; border: 1px solid #1c202a; border-radius: 5px; color: #ffffff; font-size: 10px; font-family: 'Consolas', monospace; padding: 3px;")
         chat_layout.addWidget(self.chat_box)
 
         send_row = QHBoxLayout()
@@ -1894,23 +1897,24 @@ class FeedbackChatTabPage(QWidget):
 
     def _render_messages(self, messages):
         html_lines = []
-        for m in messages:
-            t = m.get("time", "00:00")
-            role = m.get("role", "FREE")
-            user = m.get("user", "User")
-            txt = m.get("text", "")
-            if role == "ADMIN":
-                col = "#ef4444"
-            elif role == "VIP":
-                col = "#f59e0b"
-            else:
-                col = "#22c55e"
-            html_lines.append(f"<span style='color:#6b7280;'>[{t}]</span> <span style='color:{col}; font-weight:bold;'>[{role}]</span> <b style='color:#ffffff;'>{user}:</b> <span style='color:#e2e8f0;'>{txt}</span>")
+        if isinstance(messages, list):
+            for m in messages:
+                t = m.get("time", "00:00")
+                role = m.get("role", "FREE")
+                user = m.get("user", "User")
+                txt = m.get("text", "")
+                if role == "ADMIN":
+                    col = "#ef4444"
+                elif role == "VIP":
+                    col = "#f59e0b"
+                else:
+                    col = "#22c55e"
+                html_lines.append(f"<div style='margin-bottom: 2px;'><span style='color:#9ca3af;'>[{t}]</span> <span style='color:{col}; font-weight:bold;'>[{role}]</span> <b style='color:#ffffff;'>{user}:</b> <span style='color:#f1f5f9;'>{txt}</span></div>")
         
         if not html_lines:
-            html_lines.append("<span style='color:#64748b;'>Chưa có tin nhắn nào...</span>")
+            html_lines.append("<div style='color:#94a3b8; font-style:italic;'>Chưa có tin nhắn nào...</div>")
 
-        self.chat_box.setHtml("<br>".join(html_lines))
+        self.chat_box.setHtml("".join(html_lines))
         self.chat_box.verticalScrollBar().setValue(self.chat_box.verticalScrollBar().maximum())
 
     def handle_send_feedback(self):
