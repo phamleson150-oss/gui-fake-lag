@@ -8,6 +8,7 @@ from ctypes import wintypes
 import winsound
 import json
 import random
+import html
 import subprocess
 import urllib.parse
 import webbrowser
@@ -69,7 +70,6 @@ DISCORD_FEEDBACK_WEBHOOK = "https://discord.com/api/webhooks/1543470614025863308
 DISCORD_CHAT_WEBHOOK = "https://discord.com/api/webhooks/1543478594439880857/fNw9bdIjZP5-1dRfflPKlVLVPRJN4Qz67DZ-E31Y4ArDQGlVOS_M3XTDREOv7_VueEwn"
 
 APP_VERSION = "1.0.8"
-# Tự động lấy thời gian build thực tế tại thời điểm khởi chạy hoặc biên soạn code
 _now_dt = datetime.fromtimestamp(os.path.getmtime(__file__) if os.path.exists(__file__) else time.time())
 BUILD_DATE = _now_dt.strftime("%d/%m/%Y")
 BUILD_TIME = _now_dt.strftime("%H:%M:%S")
@@ -341,7 +341,6 @@ class NetState:
         self.active_key = ""
         self.key_expires_at = -1
         self.cached_ip = "127.0.0.1"
-        
         self.freeze_active_time = 0.0
 
 net_state = NetState()
@@ -469,7 +468,7 @@ def divert_freeze_fix_dame_worker():
             debug_log(f"Freeze fix divert error: {e}")
             time.sleep(0.05)
 
-# ================= TOGGLE CHỨC NĂNG (CHỈ CHẠY ĐÚNG TAB 0) =================
+# ================= TOGGLE CHỨC NĂNG =================
 def toggle_freeze():
     if not net_state.is_injected or net_state.current_tab != 0: return
     with net_state.lock:
@@ -621,7 +620,7 @@ def hotkey_loop():
         except Exception:
             time.sleep(0.1)
 
-# ================= VECTOR HEXAGON BUTTON (TỰ VẼ BẰNG QPAINTER) =================
+# ================= VECTOR HEXAGON BUTTON =================
 class VectorHexagonButton(QWidget):
     clicked = pyqtSignal()
 
@@ -749,7 +748,7 @@ class VectorHexagonButton(QWidget):
 
         p.end()
 
-# ================= TOP LEFT HONEYCOMB OVERLAY (GÓC TRÁI MÀN HÌNH) =================
+# ================= TOP LEFT HONEYCOMB OVERLAY =================
 class TopLeftHoneycombOverlay(QWidget):
     def __init__(self):
         super().__init__()
@@ -1749,7 +1748,7 @@ class InfoTabPage(QWidget):
         self.lbl_expiry.setText(f"Thời hạn còn lại: {time_str}")
         self.lbl_user.setText(f"Tên hiển thị: <span style='color:#22c55e; font-weight:bold;'>✔ {app_config.custom_nickname}</span>")
 
-# TAB 3: FEEDBACK & CHAT
+# TAB 3: FEEDBACK & CHAT (ĐÃ FIX KHÔNG HIỂN THỊ CHAT)
 class FeedbackChatTabPage(QWidget):
     def __init__(self, parent_widget, parent=None):
         super().__init__(parent)
@@ -1831,7 +1830,6 @@ class FeedbackChatTabPage(QWidget):
         self.chat_box = QTextEdit()
         self.chat_box.setReadOnly(True)
         self.chat_box.setFixedHeight(85)
-        # Sửa màu chữ hiển thị tường minh bằng stylesheet và setPlainText/setHtml chuẩn
         self.chat_box.setStyleSheet("background-color: #11141a; border: 1px solid #1c202a; border-radius: 5px; color: #ffffff; font-size: 10px; font-family: 'Consolas', monospace; padding: 3px;")
         chat_layout.addWidget(self.chat_box)
 
@@ -1899,17 +1897,18 @@ class FeedbackChatTabPage(QWidget):
         html_lines = []
         if isinstance(messages, list):
             for m in messages:
-                t = m.get("time", "00:00")
-                role = m.get("role", "FREE")
-                user = m.get("user", "User")
-                txt = m.get("text", "")
+                t = html.escape(str(m.get("time", "00:00")))
+                role = html.escape(str(m.get("role", "FREE")))
+                user = html.escape(str(m.get("user", "User")))
+                txt = html.escape(str(m.get("text", "")))
+                
                 if role == "ADMIN":
                     col = "#ef4444"
                 elif role == "VIP":
                     col = "#f59e0b"
                 else:
                     col = "#22c55e"
-                html_lines.append(f"<div style='margin-bottom: 2px;'><span style='color:#9ca3af;'>[{t}]</span> <span style='color:{col}; font-weight:bold;'>[{role}]</span> <b style='color:#ffffff;'>{user}:</b> <span style='color:#f1f5f9;'>{txt}</span></div>")
+                html_lines.append(f"<div style='margin-bottom: 3px;'><span style='color:#9ca3af;'>[{t}]</span> <span style='color:{col}; font-weight:bold;'>[{role}]</span> <b style='color:#ffffff;'>{user}:</b> <span style='color:#f1f5f9;'>{txt}</span></div>")
         
         if not html_lines:
             html_lines.append("<div style='color:#94a3b8; font-style:italic;'>Chưa có tin nhắn nào...</div>")
@@ -1973,20 +1972,30 @@ class FeedbackChatTabPage(QWidget):
 
         def _send_vps():
             try:
-                requests.post(VPS_CHAT_URL, json={
+                r = requests.post(VPS_CHAT_URL, json={
                     "role": role,
                     "user": user_name,
                     "text": text
                 }, timeout=4)
-                requests.post(DISCORD_CHAT_WEBHOOK, json={
-                    "content": f"💬 **[{role}] {user_name}**: {text}"
-                }, timeout=4)
+                if r.status_code == 200:
+                    data = r.json()
+                    if "messages" in data:
+                        QTimer.singleShot(0, lambda: self._render_messages(data["messages"]))
             except Exception as e:
                 debug_log(f"Send chat error: {e}")
             finally:
                 self.fetch_vps_chat()
 
+        def _send_discord():
+            try:
+                requests.post(DISCORD_CHAT_WEBHOOK, json={
+                    "content": f"💬 **[{role}] {user_name}**: {text}"
+                }, timeout=4)
+            except Exception:
+                pass
+
         threading.Thread(target=_send_vps, daemon=True).start()
+        threading.Thread(target=_send_discord, daemon=True).start()
 
 # TAB 4: COMING SOON
 class ComingSoonTabPage(QWidget):
@@ -2065,6 +2074,9 @@ class KeybindsWidget(QWidget):
 
         if index == 2:
             self.info_page.update_info()
+        elif index == 3:
+            self.feedback_page.fetch_vps_chat()
+            
         self.tab_stack.slide_to_index(index)
         QTimer.singleShot(210, self.adjust_panel_size)
 
