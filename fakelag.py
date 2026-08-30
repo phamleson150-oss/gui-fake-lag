@@ -68,11 +68,10 @@ LICENSE_FILE = "zerox_license.json"
 DISCORD_FEEDBACK_WEBHOOK = "https://discord.com/api/webhooks/1543470614025863308/SD9lOHs2pxJZFrdFFuYQMBOkKAF_6xgY8xetSagvXEU8fUc4O5e_jriDdIIbO1vylQrL"
 DISCORD_CHAT_WEBHOOK = "https://discord.com/api/webhooks/1543478594439880857/fNw9bdIjZP5-1dRfflPKlVLVPRJN4Qz67DZ-E31Y4ArDQGlVOS_M3XTDREOv7_VueEwn"
 
-APP_VERSION = "1.0.8"
-# Tự động lấy thời gian build thực tế tại thời điểm khởi chạy hoặc biên soạn code
-_now_dt = datetime.fromtimestamp(os.path.getmtime(__file__) if os.path.exists(__file__) else time.time())
-BUILD_DATE = _now_dt.strftime("%d/%m/%Y")
-BUILD_TIME = _now_dt.strftime("%H:%M:%S")
+APP_VERSION = "1.0.9"
+_build_dt = datetime.fromtimestamp(os.path.getmtime(__file__) if os.path.exists(__file__) else time.time())
+BUILD_DATE = _build_dt.strftime("%d/%m/%Y")
+BUILD_TIME = _build_dt.strftime("%H:%M:%S")
 
 def get_current_hwid():
     try:
@@ -772,10 +771,10 @@ class TopLeftHoneycombOverlay(QWidget):
         nodes = [
             (center_x, center_y, 'network', "Fake Lag & Network", False, 0),
             (center_x - dx/2, center_y - dy, 'user', "Thông Tin Máy & Key", False, 2),
-            (center_x + dx/2, center_y - dy, 'shield', "Bảo vệ Antiban (Bảo trì)", True, 4),
-            (center_x - dx, center_y, 'diamond', "Chức Năng VIP (Bảo trì)", True, 4),
+            (center_x + dx/2, center_y - dy, 'shield', "Bảo vệ Antiban (Bảo trì)", True, 5),
+            (center_x - dx, center_y, 'diamond', "Thông Báo Admin / Coming Soon", False, 4),
             (center_x + dx, center_y, 'chat', "Feedback & Chat", False, 3),
-            (center_x - dx/2, center_y + dy, 'bars', "Thống Kê (Bảo trì)", True, 4),
+            (center_x - dx/2, center_y + dy, 'bars', "Thống Kê (Bảo trì)", True, 5),
             (center_x + dx/2, center_y + dy, 'gear', "Cài Đặt", False, 1)
         ]
 
@@ -1027,7 +1026,7 @@ class InitialGuiWidget(QWidget):
         layout.setContentsMargins(14, 8, 14, 14)
         layout.setSpacing(10)
 
-        layout.addWidget(TopBar("GUI 1.0.8", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
+        layout.addWidget(TopBar("GUI 1.0.9", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
         layout.addSpacing(15)
 
         status_lbl = QLabel("Enable Inject Connect")
@@ -1831,7 +1830,6 @@ class FeedbackChatTabPage(QWidget):
         self.chat_box = QTextEdit()
         self.chat_box.setReadOnly(True)
         self.chat_box.setFixedHeight(85)
-        # Sửa màu chữ hiển thị tường minh bằng stylesheet và setPlainText/setHtml chuẩn
         self.chat_box.setStyleSheet("background-color: #11141a; border: 1px solid #1c202a; border-radius: 5px; color: #ffffff; font-size: 10px; font-family: 'Consolas', monospace; padding: 3px;")
         chat_layout.addWidget(self.chat_box)
 
@@ -1889,7 +1887,8 @@ class FeedbackChatTabPage(QWidget):
                 r = requests.get(VPS_CHAT_URL, timeout=3)
                 if r.status_code == 200:
                     data = r.json()
-                    messages = data.get("messages", [])
+                    # Hỗ trợ cả list trả về trực tiếp hoặc dict chứa 'messages'
+                    messages = data.get("messages", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
                     QTimer.singleShot(0, lambda: self._render_messages(messages))
             except Exception as e:
                 debug_log(f"Fetch chat error: {e}")
@@ -1988,15 +1987,22 @@ class FeedbackChatTabPage(QWidget):
 
         threading.Thread(target=_send_vps, daemon=True).start()
 
-# TAB 4: COMING SOON
-class ComingSoonTabPage(QWidget):
+# TAB 4: THÔNG BÁO ADMIN (CHO ADMIN) HOẶC COMING SOON (CHO VIP/FREE)
+class AnnouncementOrComingSoonTabPage(QWidget):
     def __init__(self, parent_widget, parent=None):
         super().__init__(parent)
         self.parent_widget = parent_widget
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(8, 8, 8, 8)
+        self.layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.refresh_content()
+
+    def refresh_content(self):
+        while self.layout.count():
+            item = self.layout.takeAt(0)
+            w = item.widget()
+            if w: w.deleteLater()
 
         card = QFrame()
         card.setStyleSheet("""
@@ -2011,21 +2017,62 @@ class ComingSoonTabPage(QWidget):
             }
         """)
         c_layout = QVBoxLayout(card)
-        c_layout.setContentsMargins(15, 20, 15, 20)
-        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        c_layout.setContentsMargins(12, 12, 12, 12)
         c_layout.setSpacing(6)
 
-        lbl_cs = QLabel("COMING SOON")
-        lbl_cs.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_cs.setStyleSheet("color: #38bdf8; font-size: 15px; font-weight: 900; font-family: 'Consolas', sans-serif; letter-spacing: 2px;")
-        c_layout.addWidget(lbl_cs)
+        if app_config.user_role == "ADMIN":
+            # Giao diện thông báo Admin theo ảnh 2
+            title_lbl = QLabel("📢 THÔNG BÁO TỪ ADMIN")
+            title_lbl.setStyleSheet("color: #38bdf8; font-size: 11px; font-weight: 800; font-family: 'Segoe UI', Arial;")
+            c_layout.addWidget(title_lbl)
 
-        lbl_sub = QLabel("Tính năng đang trong quá trình bảo trì.")
-        lbl_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_sub.setStyleSheet("color: #64748b; font-size: 9px; font-family: 'Segoe UI', Arial;")
-        c_layout.addWidget(lbl_sub)
+            line = QFrame()
+            line.setFrameShape(QFrame.Shape.HLine)
+            line.setStyleSheet("border: none; border-top: 1px dashed #27272a; margin: 4px 0;")
+            c_layout.addWidget(line)
 
-        layout.addWidget(card)
+            msg_lbl = QLabel("Update esp skeleton")
+            msg_lbl.setStyleSheet("color: #ffffff; font-size: 10px; font-weight: 700; font-family: 'Segoe UI', Arial;")
+            c_layout.addWidget(msg_lbl)
+
+            link_lbl = QLabel("<a href='https://discord.gg/fxkyDDshq8' style='color:#38bdf8; text-decoration:none;'>https://discord.gg/fxkyDDshq8</a>")
+            link_lbl.setOpenExternalLinks(True)
+            link_lbl.setStyleSheet("font-size: 9.5px; font-family: 'Segoe UI', Arial;")
+            c_layout.addWidget(link_lbl)
+
+            c_layout.addSpacing(6)
+
+            btn_ok = QPushButton("Đã hiểu")
+            btn_ok.setFixedHeight(28)
+            btn_ok.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn_ok.setStyleSheet("""
+                QPushButton {
+                    background-color: #0284c7;
+                    color: #ffffff;
+                    border: none;
+                    border-radius: 6px;
+                    font-size: 10px;
+                    font-weight: 800;
+                    font-family: 'Segoe UI', Arial;
+                }
+                QPushButton:hover { background-color: #0369a1; }
+            """)
+            btn_ok.clicked.connect(lambda: signals.open_tab_requested.emit(0))
+            c_layout.addWidget(btn_ok)
+        else:
+            # Giao diện Coming Soon cho VIP / FREE
+            c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl_cs = QLabel("COMING SOON")
+            lbl_cs.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl_cs.setStyleSheet("color: #38bdf8; font-size: 15px; font-weight: 900; font-family: 'Consolas', sans-serif; letter-spacing: 2px;")
+            c_layout.addWidget(lbl_cs)
+
+            lbl_sub = QLabel("Tính năng đang trong quá trình bảo trì.")
+            lbl_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl_sub.setStyleSheet("color: #64748b; font-size: 9px; font-family: 'Segoe UI', Arial;")
+            c_layout.addWidget(lbl_sub)
+
+        self.layout.addWidget(card)
 
 # ================= CONTAINER KEYBINDS & CÁC TAB =================
 class KeybindsWidget(QWidget):
@@ -2044,13 +2091,13 @@ class KeybindsWidget(QWidget):
         self.setting_page = SettingTabPage(self)
         self.info_page = InfoTabPage(self)
         self.feedback_page = FeedbackChatTabPage(self)
-        self.coming_soon_page = ComingSoonTabPage(self)
+        self.announcement_page = AnnouncementOrComingSoonTabPage(self)
 
         self.tab_stack.addWidget(self.main_page)         # 0: Fake Lag
         self.tab_stack.addWidget(self.setting_page)      # 1: Setting
         self.tab_stack.addWidget(self.info_page)         # 2: Info
         self.tab_stack.addWidget(self.feedback_page)     # 3: Feedback & Chat
-        self.tab_stack.addWidget(self.coming_soon_page)  # 4: Coming Soon
+        self.tab_stack.addWidget(self.announcement_page) # 4: Thông báo Admin / Coming Soon
         layout.addWidget(self.tab_stack)
 
         self.countdown_timer = QTimer(self)
@@ -2065,6 +2112,9 @@ class KeybindsWidget(QWidget):
 
         if index == 2:
             self.info_page.update_info()
+        elif index == 4:
+            self.announcement_page.refresh_content()
+
         self.tab_stack.slide_to_index(index)
         QTimer.singleShot(210, self.adjust_panel_size)
 
