@@ -46,7 +46,7 @@ try:
         QPushButton, QFrame, QStackedWidget, QLineEdit, QGridLayout,
         QTextEdit
     )
-    from PyQt6.QtCore import Qt, pyqtSignal, QObject, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QBuffer, QIODevice
+    from PyQt6.QtCore import Qt, pyqtSignal, QObject, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QBuffer, QIODevice, QRectF
     from PyQt6.QtGui import QColor, QPainter, QBrush, QPen, QFont, QLinearGradient, QRadialGradient, QPolygonF, QPainterPath, QGuiApplication
 except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "PyQt6"])
@@ -55,7 +55,7 @@ except ImportError:
         QPushButton, QFrame, QStackedWidget, QLineEdit, QGridLayout,
         QTextEdit
     )
-    from PyQt6.QtCore import Qt, pyqtSignal, QObject, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QBuffer, QIODevice
+    from PyQt6.QtCore import Qt, pyqtSignal, QObject, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QBuffer, QIODevice, QRectF
     from PyQt6.QtGui import QColor, QPainter, QBrush, QPen, QFont, QLinearGradient, QRadialGradient, QPolygonF, QPainterPath, QGuiApplication
 
 # ================= CẤU HÌNH HỆ THỐNG =================
@@ -188,9 +188,9 @@ def is_emulator_in_foreground():
 
 # ================= NETWORK FILTERS =================
 FILTER_FREEZE_FIX = "udp and ((udp.SrcPort >= 7000 and udp.SrcPort <= 18000) or (udp.DstPort >= 7000 and udp.DstPort <= 18000))"
-FILTER_I         = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
-FILTER_F         = "(udp.PayloadLength >= 53 and udp.PayloadLength <= 170) and (udp.DstPort >= 10011 and udp.DstPort <= 10020)"
-FILTER_O         = "udp.DstPort >= 10010 and udp.DstPort <= 10020 and udp.PayloadLength >= 35"
+FILTER_I          = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
+FILTER_F          = "(udp.PayloadLength >= 53 and udp.PayloadLength <= 170) and (udp.DstPort >= 10011 and udp.DstPort <= 10020)"
+FILTER_O          = "udp.DstPort >= 10010 and udp.DstPort <= 10020 and udp.PayloadLength >= 35"
 FILTER_AIMLAG     = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
 
 MAX_PACKETS = 80
@@ -577,6 +577,7 @@ def hotkey_loop():
                 if is_freeze and f_time > 0 and (curr_t - f_time >= FREEZE_AUTO_DISABLE_SEC):
                     toggle_freeze()
 
+            # CHỈ CHO PHÉP NHẤN HOTKEY KHI ĐANG Ở TAB 0 (FAKE LAG)
             if net_state.current_tab == 0:
                 cur_t = keyboard.is_pressed(app_config.tele_hotkey.key)
                 if cur_t and not tp: toggle_tele()
@@ -594,7 +595,7 @@ def hotkey_loop():
                 if cur_a and not ap: toggle_aimlag_arm()
                 ap = cur_a
             else:
-                tp = fp = gp = ap = False
+                tp = gp = fp = ap = False
 
             cur_h = keyboard.is_pressed(app_config.hide_hotkey.key)
             if cur_h and not hp: signals.toggle_visibility.emit()
@@ -676,20 +677,10 @@ class VectorHexagonButton(QWidget):
         s = r * 0.44
 
         if self.icon_type == 'network':
-            p.drawEllipse(QPointF(cx, cy - s*0.6), s*0.28, s*0.28)
-            p.drawEllipse(QPointF(cx - s*0.7, cy + s*0.6), s*0.28, s*0.28)
-            p.drawEllipse(QPointF(cx + s*0.7, cy + s*0.6), s*0.28, s*0.28)
-            p.drawLine(QPointF(cx, cy - s*0.32), QPointF(cx - s*0.45, cy + s*0.35))
-            p.drawLine(QPointF(cx, cy - s*0.32), QPointF(cx + s*0.45, cy + s*0.35))
-            p.drawLine(QPointF(cx - s*0.4, cy + s*0.6), QPointF(cx + s*0.4, cy + s*0.6))
-
-        elif self.icon_type == 'target':
-            p.drawEllipse(QPointF(cx, cy), s*0.85, s*0.85)
-            p.drawEllipse(QPointF(cx, cy), s*0.35, s*0.35)
-            p.drawLine(QPointF(cx - s*1.15, cy), QPointF(cx - s*0.5, cy))
-            p.drawLine(QPointF(cx + s*0.5, cy), QPointF(cx + s*1.15, cy))
-            p.drawLine(QPointF(cx, cy - s*1.15), QPointF(cx, cy - s*0.5))
-            p.drawLine(QPointF(cx, cy + s*0.5), QPointF(cx, cy + s*1.15))
+            # Biểu tượng mạng / Wifi sóng
+            p.drawEllipse(QPointF(cx, cy + s*0.6), s*0.2, s*0.2)
+            p.drawArc(QRectF(cx - s*0.5, cy + s*0.0, s*1.0, s*1.0), 30 * 16, 120 * 16)
+            p.drawArc(QRectF(cx - s*0.8, cy - s*0.4, s*1.6, s*1.6), 30 * 16, 120 * 16)
 
         elif self.icon_type == 'user':
             p.drawEllipse(QPointF(cx, cy - s*0.45), s*0.4, s*0.4)
@@ -1166,7 +1157,7 @@ class LoginWidget(QWidget):
         layout.setContentsMargins(14, 8, 14, 14)
         layout.setSpacing(5)
 
-        layout.addWidget(TopBar("ZeroX Cheat  /   Login", on_close=on_close_callback, on_minimize=on_minimize_callback))
+        layout.addWidget(TopBar("ZeroX Cheat  /    Login", on_close=on_close_callback, on_minimize=on_minimize_callback))
         layout.addSpacing(6)
 
         lbl_key = QLabel("LICENSE KEY")
@@ -1739,7 +1730,7 @@ class InfoTabPage(QWidget):
         self.lbl_expiry.setText(f"Thời hạn còn lại: {time_str}")
         self.lbl_user.setText(f"Tên hiển thị: <span style='color:#22c55e; font-weight:bold;'>✔ {app_config.custom_nickname}</span>")
 
-# TAB 3: FEEDBACK & CHAT (LƯU CHAT VPS + DISCORD WEBHOOK)
+# TAB 3: FEEDBACK & CHAT (ĐÃ FIX: KHÔNG HIỆN KEY Ở FEEDBACK, KHÓA TÊN KHI ĐÃ ĐẶT, GIAO DIỆN CHAT CHUẨN ẢNH)
 class FeedbackChatTabPage(QWidget):
     def __init__(self, parent_widget, parent=None):
         super().__init__(parent)
@@ -1770,12 +1761,20 @@ class FeedbackChatTabPage(QWidget):
         name_row.setSpacing(4)
         lbl_n = QLabel("Tên hiển thị:")
         lbl_n.setStyleSheet("color:#9ca3af; font-size:8.8px; font-weight:bold;")
+        
         self.name_input = QLineEdit()
         self.name_input.setText(app_config.custom_nickname)
         self.name_input.setPlaceholderText("Nhập tên bạn muốn đặt...")
         self.name_input.setFixedHeight(22)
-        self.name_input.setStyleSheet("background-color:#12141a; border:1px solid #1c202a; border-radius:4px; color:#38bdf8; font-size:9.5px; font-weight:bold; padding:0 5px;")
-        self.name_input.textChanged.connect(self.on_name_changed)
+        
+        # Kiểm tra nếu đã đặt tên tùy chỉnh thì khóa luôn không cho chỉnh sửa
+        is_custom_saved = (app_config.custom_nickname and app_config.custom_nickname != DEFAULT_USERNAME)
+        if is_custom_saved:
+            self.name_input.setReadOnly(True)
+            self.name_input.setStyleSheet("background-color:#12141a; border:1px solid #1c202a; border-radius:4px; color:#38bdf8; font-size:9.5px; font-weight:bold; padding:0 5px;")
+        else:
+            self.name_input.setStyleSheet("background-color:#12141a; border:1px solid #1c202a; border-radius:4px; color:#38bdf8; font-size:9.5px; font-weight:bold; padding:0 5px;")
+            self.name_input.returnPressed.connect(self.lock_name_input)
 
         name_row.addWidget(lbl_n)
         name_row.addWidget(self.name_input)
@@ -1848,10 +1847,12 @@ class FeedbackChatTabPage(QWidget):
         self.chat_timer.timeout.connect(self.fetch_vps_chat)
         self.chat_timer.start(3000)
 
-    def on_name_changed(self, text):
-        val = text.strip() or DEFAULT_USERNAME
-        app_config.custom_nickname = val
-        save_config()
+    def lock_name_input(self):
+        val = self.name_input.text().strip()
+        if val:
+            app_config.custom_nickname = val
+            save_config()
+            self.name_input.setReadOnly(True)
 
     def switch_sub_tab(self, idx):
         self.sub_stack.setCurrentIndex(idx)
@@ -1873,16 +1874,10 @@ class FeedbackChatTabPage(QWidget):
             try:
                 r = requests.get(VPS_CHAT_URL, timeout=3)
                 if r.status_code == 200:
-                    data = r.json()
-                    # Hỗ trợ cả định dạng trả về là list trực tiếp hoặc dict chứa khóa "messages"
-                    messages = []
-                    if isinstance(data, dict):
-                        messages = data.get("messages", [])
-                    elif isinstance(data, list):
-                        messages = data
+                    messages = r.json().get("messages", [])
                     QTimer.singleShot(0, lambda: self._render_messages(messages))
-            except Exception as e:
-                debug_log(f"Fetch chat error: {e}")
+            except Exception:
+                pass
         threading.Thread(target=_fetch, daemon=True).start()
 
     def _render_messages(self, messages):
@@ -1920,9 +1915,9 @@ class FeedbackChatTabPage(QWidget):
 
         def _send():
             try:
-                # Đã loại bỏ hoàn toàn hiển thị License Key theo yêu cầu ảnh mẫu số 2
+                # LOẠI BỎ HOÀN TOÀN KHÔNG HIỆN KEY TRÊN DISCORD FEEDBACK
                 payload = {
-                    "content": f"📷 **BÁO CÁO FEEDBACK / LỖI TỪ PANEL PC**\n\n**Feedback từ User:** {user_name}\n👤 **Username:** {user_name}\n📝 **Ghi chú:** {msg}\n💻 **HWID:** `{CURRENT_HWID}`\n🌐 **IP:** `{net_state.cached_ip}`"
+                    "content": f"📢 **FEEDBACK TỪ [{role}] {user_name}**\n📝 **Nội dung:** {msg}\n💻 **HWID:** `{CURRENT_HWID}`\n🌐 **IP:** `{net_state.cached_ip}`"
                 }
                 if img_data:
                     files = {"file": ("screenshot.png", img_data, "image/png")}
@@ -1970,7 +1965,7 @@ class FeedbackChatTabPage(QWidget):
 
         threading.Thread(target=_send_vps, daemon=True).start()
 
-# TAB 4: COMING SOON (CHO 3 Ô BẢO TRÌ)
+# TAB 4: COMING SOON
 class ComingSoonTabPage(QWidget):
     def __init__(self, parent_widget, parent=None):
         super().__init__(parent)
@@ -2307,22 +2302,10 @@ class MainContainerWindow(QWidget):
 
         signals.toggle_visibility.connect(self.toggle_visibility)
         signals.key_expired.connect(self.handle_key_expired)
-        signals.open_tab_requested.connect(self.handle_tab_request)
+        signals.open_tab_requested.connect(self.bring_to_front)
 
         self._drag = False
         self._pos = None
-
-    def handle_tab_request(self, index: int):
-        if net_state.is_injected and net_state.current_tab == index and self.isVisible():
-            self.hide()
-        else:
-            if not self.isVisible():
-                self.show()
-            self.raise_()
-            self.activateWindow()
-            if net_state.is_injected:
-                self.stack.setCurrentIndex(5)
-                self.keybinds_view.switch_tab_direct(index)
 
     def bring_to_front(self, _):
         if not self.isVisible():
@@ -2414,15 +2397,16 @@ def cleanup_and_exit():
     stop_all_features()
     try: keyboard.unhook_all()
     except Exception: pass
-    Application = QApplication.instance()
-    if Application:
-        Application.quit()
+    QApplication.quit()
     os._exit(0)
 
 if __name__ == '__main__':
-    if not (ctypes.windll.shell32.IsUserAnAdmin() != 0):
-        ctypes.windll.shell32.ShellExecuteW(None, 'runas', sys.executable, ' '.join(f'"{a}"' for a in sys.argv), None, 1)
-        sys.exit()
+    try:
+        if not (ctypes.windll.shell32.IsUserAnAdmin() != 0):
+            ctypes.windll.shell32.ShellExecuteW(None, 'runas', sys.executable, ' '.join(f'"{a}"' for a in sys.argv), None, 1)
+            sys.exit()
+    except Exception:
+        pass
 
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
@@ -2440,10 +2424,17 @@ if __name__ == '__main__':
     threading.Thread(target=divert_freeze_fix_dame_worker, daemon=True).start()
     threading.Thread(target=hotkey_loop, daemon=True).start()
 
-    mouse_listener = pynput_mouse.Listener(on_click=on_mouse_click)
-    mouse_listener.daemon = True
-    mouse_listener.start()
+    try:
+        mouse_listener = pynput_mouse.Listener(on_click=on_mouse_click)
+        mouse_listener.daemon = True
+        mouse_listener.start()
+    except Exception:
+        pass
 
-    keyboard.add_hotkey('f10', cleanup_and_exit)
+    try:
+        keyboard.add_hotkey('f10', cleanup_and_exit)
+    except Exception:
+        pass
+
     app.aboutToQuit.connect(cleanup_and_exit)
     sys.exit(app.exec())
