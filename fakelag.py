@@ -66,13 +66,12 @@ GET_KEY_URL = f"{VPS_BASE_URL}/"
 LICENSE_FILE = "zerox_license.json"
 HOTKEY_FILE = "zerox_hotkey.json"
 
-# Webhooks Discord
 DISCORD_FEEDBACK_WEBHOOK = "https://discord.com/api/webhooks/1543470614025863308/SD9lOHs2pxJZFrdFFuYQMBOkKAF_6xgY8xetSagvXEU8fUc4O5e_jriDdIIbO1vylQrL"
 DISCORD_CHAT_WEBHOOK = "https://discord.com/api/webhooks/1543478594439880857/fNw9bdIjZP5-1dRfflPKlVLVPRJN4Qz67DZ-E31Y4ArDQGlVOS_M3XTDREOv7_VueEwn"
 
 APP_VERSION = "1.3.6"
 BUILD_DATE = "30/08/2026"
-BUILD_TIME = "11:45:00"
+BUILD_TIME = "11:50:00"
 
 def get_current_hwid():
     try:
@@ -612,7 +611,7 @@ def hotkey_loop():
         except Exception:
             time.sleep(0.1)
 
-# ================= VECTOR HEXAGON BUTTON =================
+# ================= VECTOR HEXAGON BUTTON (TỰ VẼ BẰNG QPAINTER) =================
 class VectorHexagonButton(QWidget):
     clicked = pyqtSignal()
 
@@ -747,8 +746,6 @@ class TopLeftHoneycombOverlay(QWidget):
             Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        if hasattr(Qt.WidgetAttribute, 'WA_ShowWithoutActivating'):
-            self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
 
         r = 21
         dx = math.sqrt(3) * r + 2.5
@@ -787,6 +784,165 @@ class TopLeftHoneycombOverlay(QWidget):
         for k, btn in self.hex_buttons.items():
             btn.is_active = (k == active_idx)
             btn.update()
+
+# ================= CÁC THÀNH PHẦN GIAO DIỆN CƠ BẢN =================
+class GlowingCircleDot(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(14, 14)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        cx, cy = self.width() / 2.0, self.height() / 2.0
+        glow = QRadialGradient(cx, cy, 6.5)
+        glow.setColorAt(0.0, QColor(0, 255, 102, 180))
+        glow.setColorAt(0.5, QColor(0, 255, 102, 60))
+        glow.setColorAt(1.0, QColor(0, 255, 102, 0))
+        p.setBrush(QBrush(glow))
+        p.drawEllipse(QPointF(cx, cy), 6.5, 6.5)
+        p.setBrush(QBrush(QColor("#00ff66")))
+        p.drawEllipse(QPointF(cx, cy), 2.8, 2.8)
+        p.end()
+
+class Particle:
+    def __init__(self, w, h):
+        self.reset(w, h, random_y=True)
+
+    def reset(self, w, h, random_y=False):
+        self.x = random.uniform(2, max(w - 4, 10))
+        self.y = random.uniform(2, h - 4) if random_y else random.uniform(-10, 0)
+        self.speed = random.uniform(0.3, 0.9)
+        self.size = random.uniform(1.0, 2.2)
+        self.alpha = random.randint(120, 230)
+        self.drift = random.uniform(-0.1, 0.1)
+
+    def update(self, w, h):
+        self.y += self.speed
+        self.x += self.drift
+        if self.y > h - 4 or self.x < 2 or self.x > w - 2:
+            self.reset(w, h)
+
+class CustomParticleFrame(QFrame):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.particles = [Particle(360, 265) for _ in range(30)]
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.animate_particles)
+        self.timer.start(33)
+
+    def animate_particles(self):
+        w, h = self.width(), self.height()
+        for p in self.particles:
+            p.update(w, h)
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setBrush(QBrush(QColor("#0b0d11")))
+        p.setPen(QPen(QColor("#1f242d"), 1))
+        p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 10, 10)
+
+        p.setPen(Qt.PenStyle.NoPen)
+        for pt in self.particles:
+            p.setBrush(QBrush(QColor(255, 255, 255, pt.alpha)))
+            p.drawEllipse(QPointF(pt.x, pt.y), pt.size / 2.0, pt.size / 2.0)
+        p.end()
+
+# ================= TOPBAR DÙNG CHUNG =================
+class TopBar(QWidget):
+    def __init__(self, title_text, on_close=None, on_minimize=None, on_logo_click=None, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(26)
+        bar_layout = QHBoxLayout(self)
+        bar_layout.setContentsMargins(8, 0, 8, 0)
+        bar_layout.setSpacing(6)
+
+        bar_layout.addWidget(GlowingCircleDot())
+
+        self.title_lbl = QLabel(title_text)
+        self.title_lbl.setStyleSheet("color: #d1d5db; font-size: 10px; font-weight: 700; font-family: 'Consolas', 'Segoe UI', Arial; background: transparent; border: none;")
+        if on_logo_click:
+            self.title_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.title_lbl.mousePressEvent = lambda e: on_logo_click()
+        bar_layout.addWidget(self.title_lbl)
+        bar_layout.addStretch()
+
+        if on_minimize:
+            min_btn = QPushButton("—")
+            min_btn.setFixedSize(16, 16)
+            min_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            min_btn.setStyleSheet("QPushButton { background: transparent; color: #6b7280; border: none; font-size: 10px; font-weight: bold; } QPushButton:hover { color: #ffffff; }")
+            min_btn.clicked.connect(on_minimize)
+            bar_layout.addWidget(min_btn)
+
+        if on_close:
+            close_btn = QPushButton("✕")
+            close_btn.setFixedSize(16, 16)
+            close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            close_btn.setStyleSheet("QPushButton { background: transparent; color: #6b7280; border: none; font-size: 11px; font-weight: bold; } QPushButton:hover { color: #ef4444; }")
+            close_btn.clicked.connect(on_close)
+            bar_layout.addWidget(close_btn)
+
+# ================= CLASS CỬA SỔ FLOATING PANEL =================
+class FloatingTabWindow(QWidget):
+    def __init__(self, title_text, initial_w=285, initial_h=190, is_fake_lag_tab=False):
+        super().__init__()
+        self.is_fake_lag_tab = is_fake_lag_tab
+        self.setWindowTitle(title_text)
+        self.setWindowFlags(
+            Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.Tool
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.resize(initial_w, initial_h)
+
+        main_box = QVBoxLayout(self)
+        main_box.setContentsMargins(0, 0, 0, 0)
+
+        self.bg_frame = CustomParticleFrame(self)
+        main_box.addWidget(self.bg_frame)
+
+        self.content_layout = QVBoxLayout(self.bg_frame)
+        self.content_layout.setContentsMargins(8, 4, 8, 8)
+        self.content_layout.setSpacing(4)
+
+        self.top_bar = TopBar(title_text, on_close=self.hide_panel, on_minimize=self.hide_panel)
+        self.content_layout.addWidget(self.top_bar)
+
+        self._drag = False
+        self._pos = None
+
+    def hide_panel(self):
+        self.hide()
+        if self.is_fake_lag_tab:
+            net_state.is_fake_lag_tab_open = False
+            stop_all_features()
+
+    def show_panel(self):
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        if self.is_fake_lag_tab:
+            net_state.is_fake_lag_tab_open = True
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._drag = True
+            self._pos = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            e.accept()
+
+    def mouseMoveEvent(self, e):
+        if self._drag and self._pos:
+            self.move(e.globalPosition().toPoint() - self._pos)
+            e.accept()
+
+    def mouseReleaseEvent(self, e):
+        self._drag = False
+        e.accept()
 
 # ================= 1. TAB FAKE LAG WINDOW =================
 class FakeLagWindow(FloatingTabWindow):
@@ -1063,7 +1219,6 @@ class FeedbackChatWindow(FloatingTabWindow):
         sub_tab_layout.addWidget(self.btn_tab_chat)
         layout.addLayout(sub_tab_layout)
 
-        # Cài đặt tên và nút khóa cố định
         name_row = QHBoxLayout()
         name_row.setSpacing(4)
         lbl_n = QLabel("Tên hiển thị:")
@@ -1215,7 +1370,6 @@ class FeedbackChatWindow(FloatingTabWindow):
         self.chat_box.verticalScrollBar().setValue(self.chat_box.verticalScrollBar().maximum())
 
     def handle_send_feedback(self):
-        # Tự động khóa tên khi gửi feedback lần đầu
         if not app_config.is_name_locked:
             self.lock_custom_name()
 
@@ -1239,13 +1393,12 @@ class FeedbackChatWindow(FloatingTabWindow):
 
         def _send():
             try:
-                # GỬI ĐÚNG ĐỊNH DẠNG EMBED DISCORD - KHÔNG HIỆN KEY
                 payload_json = {
                     "content": "📸 **BÁO CÁO FEEDBACK / LỖI TỪ PANEL PC**",
                     "embeds": [
                         {
                             "title": f"Feedback từ User: {user_name}",
-                            "color": 3447003, # Màu xanh dương
+                            "color": 3447003,
                             "fields": [
                                 {
                                     "name": "👤 Username",
@@ -1293,7 +1446,6 @@ class FeedbackChatWindow(FloatingTabWindow):
         self.send_fb_btn.setEnabled(True)
 
     def handle_send_chat(self):
-        # Tự động khóa tên khi chat lần đầu
         if not app_config.is_name_locked:
             self.lock_custom_name()
 
@@ -1359,7 +1511,7 @@ class ComingSoonWindow(FloatingTabWindow):
         layout.addWidget(card)
         self.content_layout.addLayout(layout)
 
-# ================= QUẢN LÝ TẤT CẢ CÁC CỬA SỔ FLOATING =================
+# ================= QUẢN LÝ TẤT CẢ CỬA SỔ FLOATING =================
 class WindowManager:
     def __init__(self):
         self.fake_lag_win = FakeLagWindow()
@@ -1464,9 +1616,9 @@ class MainContainerWindow(QWidget):
 
     def on_init_finished(self):
         net_state.is_injected = True
-        self.hide() # Ẩn launcher sau khi hoàn tất nạp hệ thống
-        signals.show_honeycomb.emit() # Mở menu tổ ong
-        signals.open_tab_requested.emit(0) # Tự động mở tab Fake Lag
+        self.hide()
+        signals.show_honeycomb.emit()
+        signals.open_tab_requested.emit(0)
 
     def handle_key_expired(self):
         self.sync_key_timer.stop()
@@ -1507,6 +1659,173 @@ class MainContainerWindow(QWidget):
         self._drag = False
         e.accept()
 
+# ================= OVERLAYS (HUD & RAINBOW) =================
+class RainbowHeaderOverlay(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowFlags(
+            Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.Tool |
+            Qt.WindowType.WindowTransparentForInput
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFixedSize(220, 24)
+
+        self.hue_offset = 0.0
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.animate_rainbow)
+        self.timer.start(33)
+
+        self.target_hwnd = None
+        self.track_timer = QTimer(self)
+        self.track_timer.timeout.connect(self.sync_bottom_position)
+
+        signals.stream_toggle.connect(lambda enabled: self.hide() if enabled else self.show())
+        signals.start_tracking.connect(self.enable_tracking)
+
+    def enable_tracking(self):
+        hwnd, _ = find_emulator_window()
+        self.target_hwnd = hwnd
+        self.track_timer.start(25)
+        self.show()
+
+    def sync_bottom_position(self):
+        if not self.target_hwnd or not ctypes.windll.user32.IsWindow(self.target_hwnd):
+            hwnd, _ = find_emulator_window()
+            self.target_hwnd = hwnd
+            if not self.target_hwnd:
+                return
+
+        if ctypes.windll.user32.IsIconic(self.target_hwnd) or not ctypes.windll.user32.IsWindowVisible(self.target_hwnd):
+            if self.isVisible(): self.hide()
+            return
+
+        rect = RECT()
+        ctypes.windll.user32.GetClientRect(self.target_hwnd, ctypes.byref(rect))
+        client_w = rect.right - rect.left
+        client_h = rect.bottom - rect.top
+
+        pt = POINT(0, 0)
+        ctypes.windll.user32.ClientToScreen(self.target_hwnd, ctypes.byref(pt))
+
+        if pt.x < -10000 or pt.y < -10000:
+            if self.isVisible(): self.hide()
+            return
+
+        if not app_config.stream_mode and not self.isVisible():
+            self.show()
+
+        target_x = pt.x + (client_w - self.width()) // 2
+        target_y = pt.y + client_h - 26
+        self.move(target_x, target_y)
+
+    def animate_rainbow(self):
+        self.hue_offset = (self.hue_offset + 0.006) % 1.0
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        font = QFont("Segoe UI", 11, QFont.Weight.Black)
+        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.5)
+        p.setFont(font)
+
+        grad = QLinearGradient(0, 0, self.width(), 0)
+        for i in range(8):
+            stop_pos = i / 7.0
+            hue = (self.hue_offset + stop_pos) % 1.0
+            grad.setColorAt(stop_pos, QColor.fromHsvF(hue, 0.9, 1.0))
+
+        p.setPen(QPen(QBrush(grad), 1))
+        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "ZeroX Mods")
+        p.end()
+
+class OverlayHUD(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowFlags(
+            Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.Tool |
+            Qt.WindowType.WindowTransparentForInput
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFixedSize(160, 200)
+
+        hud_layout = QVBoxLayout(self)
+        hud_layout.setContentsMargins(0, 0, 0, 0)
+        hud_layout.setSpacing(5)
+        hud_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+
+        self.items = {}
+        for key, text, color in [("Freeze", "FREEZE ACTIVE", "#00f0ff"),
+                                 ("Telekill", "TELEKILL ACTIVE", "#7000ff"),
+                                 ("Ghost", "GHOST ACTIVE", "#00ff88"),
+                                 ("AimLag", "AIMLAG ACTIVE", "#ffaa00")]:
+            lbl = QLabel(f" {text}")
+            lbl.setFixedHeight(22)
+            lbl.setStyleSheet(f"""
+                QLabel {{
+                    background-color: rgba(5, 7, 10, 0.85);
+                    color: #ffffff;
+                    font-size: 10px;
+                    font-weight: 800;
+                    font-family: 'Consolas', 'Segoe UI', Arial;
+                    padding-left: 6px;
+                    padding-right: 8px;
+                    border-left: 3px solid {color};
+                    border-radius: 3px;
+                }}
+            """)
+            lbl.hide()
+            hud_layout.addWidget(lbl)
+            self.items[key] = lbl
+
+        self.target_hwnd = None
+        self.track_timer = QTimer(self)
+        self.track_timer.timeout.connect(self.sync_position_with_game)
+
+        signals.notify.connect(self.on_notify)
+        signals.stream_toggle.connect(lambda enabled: self.hide() if enabled else self.show())
+        signals.start_tracking.connect(self.enable_tracking)
+
+    def enable_tracking(self):
+        hwnd, _ = find_emulator_window()
+        self.target_hwnd = hwnd
+        self.track_timer.start(25)
+        self.show()
+
+    def sync_position_with_game(self):
+        if not self.target_hwnd or not ctypes.windll.user32.IsWindow(self.target_hwnd):
+            hwnd, _ = find_emulator_window()
+            self.target_hwnd = hwnd
+            if not self.target_hwnd:
+                return
+
+        if ctypes.windll.user32.IsIconic(self.target_hwnd) or not ctypes.windll.user32.IsWindowVisible(self.target_hwnd):
+            if self.isVisible(): self.hide()
+            return
+
+        pt = POINT(0, 0)
+        ctypes.windll.user32.ClientToScreen(self.target_hwnd, ctypes.byref(pt))
+
+        if pt.x < -10000 or pt.y < -10000:
+            if self.isVisible(): self.hide()
+            return
+
+        if not app_config.stream_mode and not self.isVisible():
+            self.show()
+
+        self.move(pt.x + 20, pt.y + 85)
+
+    def on_notify(self, feature, enabled):
+        if app_config.stream_mode: return
+        if feature in self.items:
+            self.items[feature].setVisible(enabled)
+            self.adjustSize()
+
 def cleanup_and_exit():
     net_state.running = False
     stop_all_features()
@@ -1516,10 +1835,6 @@ def cleanup_and_exit():
     os._exit(0)
 
 if __name__ == '__main__':
-    if not (ctypes.windll.shell32.IsUserAnAdmin() != 0):
-        ctypes.windll.shell32.ShellExecuteW(None, 'runas', sys.executable, ' '.join(f'"{a}"' for a in sys.argv), None, 1)
-        sys.exit()
-
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
     app.setQuitOnLastWindowClosed(False)
@@ -1527,7 +1842,7 @@ if __name__ == '__main__':
     main_win = MainContainerWindow()
     main_win.show()
 
-    # Khởi tạo bộ quản lý cửa sổ & Menu tổ ong
+    # Quản lý mở nhiều tab độc lập & Tổ ong
     win_manager = WindowManager()
     honeycomb_overlay = TopLeftHoneycombOverlay()
     signals.open_tab_requested.connect(honeycomb_overlay.update_active_node)
