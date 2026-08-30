@@ -1873,7 +1873,8 @@ class FeedbackChatTabPage(QWidget):
             try:
                 r = requests.get(VPS_CHAT_URL, timeout=3)
                 if r.status_code == 200:
-                    messages = r.json().get("messages", [])
+                    data = r.json()
+                    messages = data.get("messages", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
                     QTimer.singleShot(0, lambda: self._render_messages(messages))
             except Exception:
                 pass
@@ -1915,7 +1916,7 @@ class FeedbackChatTabPage(QWidget):
         def _send():
             try:
                 payload = {
-                    "content": f"📢 **FEEDBACK TỪ [{role}] {user_name}**\n📝 **Nội dung:** {msg}\n💻 **HWID:** `{CURRENT_HWID}`\n🌐 **IP:** `{net_state.cached_ip}`"
+                    "content": f"📷 **BÁO CÁO FEEDBACK / LỖI TỪ PANEL PC**\n\n**Feedback từ User:** {user_name}\n👤 **Username:** {user_name}\n📝 **Ghi chú:** {msg}\n💻 **HWID:** `{CURRENT_HWID}`\n🌐 **IP:** `{net_state.cached_ip}`"
                 }
                 if img_data:
                     files = {"file": ("screenshot.png", img_data, "image/png")}
@@ -2306,7 +2307,6 @@ class MainContainerWindow(QWidget):
         self._pos = None
 
     def handle_tab_request(self, index: int):
-        # Nếu đang ở tab được yêu cầu và cửa sổ đang hiển thị -> ẩn cửa sổ đi (toggle tắt tab)
         if net_state.is_injected and net_state.current_tab == index and self.isVisible():
             self.hide()
         else:
