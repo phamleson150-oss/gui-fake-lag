@@ -68,9 +68,9 @@ LICENSE_FILE = "zerox_license.json"
 DISCORD_FEEDBACK_WEBHOOK = "https://discord.com/api/webhooks/1543470614025863308/SD9lOHs2pxJZFrdFFuYQMBOkKAF_6xgY8xetSagvXEU8fUc4O5e_jriDdIIbO1vylQrL"
 DISCORD_CHAT_WEBHOOK = "https://discord.com/api/webhooks/1543478594439880857/fNw9bdIjZP5-1dRfflPKlVLVPRJN4Qz67DZ-E31Y4ArDQGlVOS_M3XTDREOv7_VueEwn"
 
-APP_VERSION = "1.3.5"
+APP_VERSION = "1.3.6"
 BUILD_DATE = "30/08/2026"
-BUILD_TIME = "11:30:00"
+BUILD_TIME = "11:55:00"
 
 def get_current_hwid():
     try:
@@ -314,6 +314,7 @@ class AppSignals(QObject):
     key_expired = pyqtSignal()
     open_tab_requested = pyqtSignal(int)
     show_honeycomb = pyqtSignal()
+    new_chat_message = pyqtSignal(dict)
 
 signals = AppSignals()
 
@@ -462,9 +463,9 @@ def divert_freeze_fix_dame_worker():
             debug_log(f"Freeze fix divert error: {e}")
             time.sleep(0.05)
 
-# ================= TOGGLE CHỨC NĂNG (CHỈ CHẠY ĐÚNG TAB 0) =================
+# ================= TOGGLE CHỨC NĂNG (CHO PHÉP BẬT NHIỀU TAB/CHỨC NĂNG CÙNG LÚC) =================
 def toggle_freeze():
-    if not net_state.is_injected or net_state.current_tab != 0: return
+    if not net_state.is_injected: return
     with net_state.lock:
         if net_state.freeze_mode:
             net_state.freeze_mode = False
@@ -483,7 +484,7 @@ def toggle_freeze():
     signals.notify.emit('Freeze', active)
 
 def toggle_ghost():
-    if not net_state.is_injected or net_state.current_tab != 0: return
+    if not net_state.is_injected: return
     with net_state.lock:
         if net_state.ghost_mode:
             net_state.ghost_mode = False
@@ -498,7 +499,7 @@ def toggle_ghost():
     signals.notify.emit('Ghost', active)
 
 def toggle_tele():
-    if not net_state.is_injected or net_state.current_tab != 0: return
+    if not net_state.is_injected: return
     with net_state.lock:
         if net_state.tele_mode:
             net_state.tele_mode = False
@@ -513,7 +514,7 @@ def toggle_tele():
     signals.notify.emit('Telekill', active)
 
 def toggle_aimlag_arm():
-    if not net_state.is_injected or net_state.current_tab != 0: return
+    if not net_state.is_injected: return
     with net_state.lock:
         net_state.aimlag_armed = not net_state.aimlag_armed
         active = net_state.aimlag_armed
@@ -525,7 +526,7 @@ def toggle_aimlag_arm():
     signals.notify.emit('AimLag', active)
 
 def on_mouse_click(x, y, button, pressed):
-    if not net_state.is_authenticated or not net_state.is_injected or net_state.current_tab != 0:
+    if not net_state.is_authenticated or not net_state.is_injected:
         return
 
     if button == pynput_mouse.Button.left:
@@ -577,22 +578,21 @@ def hotkey_loop():
                 if is_freeze and f_time > 0 and (curr_t - f_time >= FREEZE_AUTO_DISABLE_SEC):
                     toggle_freeze()
 
-            if net_state.current_tab == 0:
-                cur_t = keyboard.is_pressed(app_config.tele_hotkey.key)
-                if cur_t and not tp: toggle_tele()
-                tp = cur_t
+            cur_t = keyboard.is_pressed(app_config.tele_hotkey.key)
+            if cur_t and not tp: toggle_tele()
+            tp = cur_t
 
-                cur_f = keyboard.is_pressed(app_config.freeze_hotkey.key)
-                if cur_f and not fp: toggle_freeze()
-                fp = cur_f
+            cur_f = keyboard.is_pressed(app_config.freeze_hotkey.key)
+            if cur_f and not fp: toggle_freeze()
+            fp = cur_f
 
-                cur_g = keyboard.is_pressed(app_config.ghost_hotkey.key)
-                if cur_g and not gp: toggle_ghost()
-                gp = cur_g
+            cur_g = keyboard.is_pressed(app_config.ghost_hotkey.key)
+            if cur_g and not gp: toggle_ghost()
+            gp = cur_g
 
-                cur_a = keyboard.is_pressed(app_config.aimlag_hotkey.key)
-                if cur_a and not ap: toggle_aimlag_arm()
-                ap = cur_a
+            cur_a = keyboard.is_pressed(app_config.aimlag_hotkey.key)
+            if cur_a and not ap: toggle_aimlag_arm()
+            ap = cur_a
 
             cur_h = keyboard.is_pressed(app_config.hide_hotkey.key)
             if cur_h and not hp: signals.toggle_visibility.emit()
@@ -1156,7 +1156,7 @@ class LoginWidget(QWidget):
         layout.setContentsMargins(14, 8, 14, 14)
         layout.setSpacing(5)
 
-        layout.addWidget(TopBar("ZeroX Cheat  /   Login", on_close=on_close_callback, on_minimize=on_minimize_callback))
+        layout.addWidget(TopBar("ZeroX Cheat  /    Login", on_close=on_close_callback, on_minimize=on_minimize_callback))
         layout.addSpacing(6)
 
         lbl_key = QLabel("LICENSE KEY")
@@ -1465,7 +1465,7 @@ class KeyExpiredWidget(QWidget):
         title_lbl.setStyleSheet("color: #ef4444; font-size: 12px; font-weight: 800; font-family: 'Segoe UI', Arial;")
         layout.addWidget(title_lbl)
 
-        sub_lbl = QLabel("Hệ thống đã tự động ngắt toàn bộ Fake Lag.\nVui lòng gia hạn hoặc lấy key mới để tiếp tục.")
+        sub_lbl = QLabel("Hệ thống đã tự động ng tắt toàn bộ Fake Lag.\nVui lòng gia hạn hoặc lấy key mới để tiếp tục.")
         sub_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sub_lbl.setStyleSheet("color: #9ca3af; font-size: 10px; font-weight: 500; font-family: 'Segoe UI', Arial;")
         layout.addWidget(sub_lbl)
@@ -1649,7 +1649,7 @@ class SettingTabPage(QWidget):
         self.update_all_buttons()
         stop_all_features()
 
-# TAB 2: INFO (ĐÃ FIX SẮC NÉT KHÔNG LỖI VIỀN ĐEN)
+# TAB 2: INFO
 class InfoTabPage(QWidget):
     def __init__(self, parent_widget, parent=None):
         super().__init__(parent)
@@ -1729,7 +1729,7 @@ class InfoTabPage(QWidget):
         self.lbl_expiry.setText(f"Thời hạn còn lại: {time_str}")
         self.lbl_user.setText(f"Tên hiển thị: <span style='color:#22c55e; font-weight:bold;'>✔ {app_config.custom_nickname}</span>")
 
-# TAB 3: FEEDBACK & CHAT (LƯU CHAT VPS + DISCORD WEBHOOK)
+# TAB 3: FEEDBACK & CHAT (HIỆN TIN NHẮN TRÊN PHẦN CHAT CỦA TAB)
 class FeedbackChatTabPage(QWidget):
     def __init__(self, parent_widget, parent=None):
         super().__init__(parent)
@@ -1834,9 +1834,7 @@ class FeedbackChatTabPage(QWidget):
 
         self.switch_sub_tab(0)
 
-        self.chat_timer = QTimer(self)
-        self.chat_timer.timeout.connect(self.fetch_vps_chat)
-        self.chat_timer.start(3000)
+        signals.new_chat_message.connect(self._render_messages)
 
     def on_name_changed(self, text):
         val = text.strip() or DEFAULT_USERNAME
@@ -1864,12 +1862,13 @@ class FeedbackChatTabPage(QWidget):
                 r = requests.get(VPS_CHAT_URL, timeout=3)
                 if r.status_code == 200:
                     messages = r.json().get("messages", [])
-                    QTimer.singleShot(0, lambda: self._render_messages(messages))
+                    signals.new_chat_message.emit({"messages": messages})
             except Exception:
                 pass
         threading.Thread(target=_fetch, daemon=True).start()
 
-    def _render_messages(self, messages):
+    def _render_messages(self, data):
+        messages = data.get("messages", [])
         html_lines = []
         for m in messages:
             t = m.get("time", "00:00")
@@ -1953,7 +1952,7 @@ class FeedbackChatTabPage(QWidget):
 
         threading.Thread(target=_send_vps, daemon=True).start()
 
-# TAB 4: COMING SOON (CHO 3 Ô BẢO TRÌ)
+# TAB 4: COMING SOON
 class ComingSoonTabPage(QWidget):
     def __init__(self, parent_widget, parent=None):
         super().__init__(parent)
@@ -1994,14 +1993,14 @@ class ComingSoonTabPage(QWidget):
 
 # ================= CONTAINER KEYBINDS & CÁC TAB =================
 class KeybindsWidget(QWidget):
-    def __init__(self, on_close_callback, parent=None):
+    def __init__(self, on_close_callback, on_minimize_callback, parent=None):
         super().__init__(parent)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 4, 10, 6)
         layout.setSpacing(4)
 
-        self.top_bar = TopBar("ZeroX", on_close=on_close_callback)
+        self.top_bar = TopBar("ZeroX", on_close=on_close_callback, on_minimize=on_minimize_callback)
         layout.addWidget(self.top_bar)
 
         self.tab_stack = SlidingStackedWidget(self)
@@ -2011,11 +2010,11 @@ class KeybindsWidget(QWidget):
         self.feedback_page = FeedbackChatTabPage(self)
         self.coming_soon_page = ComingSoonTabPage(self)
 
-        self.tab_stack.addWidget(self.main_page)         # 0: Fake Lag
-        self.tab_stack.addWidget(self.setting_page)      # 1: Setting
-        self.tab_stack.addWidget(self.info_page)         # 2: Info
-        self.tab_stack.addWidget(self.feedback_page)     # 3: Feedback & Chat
-        self.tab_stack.addWidget(self.coming_soon_page)  # 4: Coming Soon (Bảo trì)
+        self.tab_stack.addWidget(self.main_page)       # 0: Fake Lag
+        self.tab_stack.addWidget(self.setting_page)     # 1: Setting
+        self.tab_stack.addWidget(self.info_page)        # 2: Info
+        self.tab_stack.addWidget(self.feedback_page)    # 3: Feedback & Chat
+        self.tab_stack.addWidget(self.coming_soon_page) # 4: Coming Soon (Bảo trì)
         layout.addWidget(self.tab_stack)
 
         self.countdown_timer = QTimer(self)
@@ -2023,9 +2022,23 @@ class KeybindsWidget(QWidget):
 
         signals.open_tab_requested.connect(self.switch_tab_direct)
 
+        self.chat_poll_timer = QTimer(self)
+        self.chat_poll_timer.timeout.connect(self.poll_chat_background)
+        self.chat_poll_timer.start(3000)
+
+    def poll_chat_background(self):
+        if self.tab_stack.currentIndex() != 3:
+            def _fetch():
+                try:
+                    r = requests.get(VPS_CHAT_URL, timeout=3)
+                    if r.status_code == 200:
+                        messages = r.json().get("messages", [])
+                        signals.new_chat_message.emit({"messages": messages})
+                except Exception:
+                    pass
+            threading.Thread(target=_fetch, daemon=True).start()
+
     def switch_tab_direct(self, index: int):
-        if net_state.current_tab == 0 and index != 0:
-            stop_all_features()
         net_state.current_tab = index
 
         if index == 2:
@@ -2272,10 +2285,10 @@ class MainContainerWindow(QWidget):
         self.login_view = LoginWidget(self.on_login_success, cleanup_and_exit, self.showMinimized)
         self.download_view = DownloadWidget(self.on_inject_clicked, cleanup_and_exit)
         self.init_view = InitializingWidget(self.on_init_finished)
-        self.keybinds_view = KeybindsWidget(cleanup_and_exit)
+        self.keybinds_view = KeybindsWidget(self.hide, self.showMinimized)
         self.expired_view = KeyExpiredWidget(self.on_expired_relogin, cleanup_and_exit)
 
-        self.stack.addWidget(self.init_gui_view)      # 0
+        self.stack.addWidget(self.init_gui_view)       # 0
         self.stack.addWidget(self.adb_loading_view)    # 1
         self.stack.addWidget(self.login_view)          # 2
         self.stack.addWidget(self.download_view)       # 3
@@ -2400,7 +2413,6 @@ if __name__ == '__main__':
     main_win = MainContainerWindow()
     main_win.show()
 
-    # Menu Tổ Ong ở góc trên bên trái màn hình
     honeycomb_overlay = TopLeftHoneycombOverlay()
     signals.open_tab_requested.connect(honeycomb_overlay.update_active_node)
 
