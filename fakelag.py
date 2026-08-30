@@ -68,9 +68,9 @@ LICENSE_FILE = "zerox_license.json"
 DISCORD_FEEDBACK_WEBHOOK = "https://discord.com/api/webhooks/1543470614025863308/SD9lOHs2pxJZFrdFFuYQMBOkKAF_6xgY8xetSagvXEU8fUc4O5e_jriDdIIbO1vylQrL"
 DISCORD_CHAT_WEBHOOK = "https://discord.com/api/webhooks/1543478594439880857/fNw9bdIjZP5-1dRfflPKlVLVPRJN4Qz67DZ-E31Y4ArDQGlVOS_M3XTDREOv7_VueEwn"
 
-APP_VERSION = "1.3.6"
+APP_VERSION = "1.3.5"
 BUILD_DATE = "30/08/2026"
-BUILD_TIME = "12:00:00"
+BUILD_TIME = "11:30:00"
 
 def get_current_hwid():
     try:
@@ -188,9 +188,9 @@ def is_emulator_in_foreground():
 
 # ================= NETWORK FILTERS =================
 FILTER_FREEZE_FIX = "udp and ((udp.SrcPort >= 7000 and udp.SrcPort <= 18000) or (udp.DstPort >= 7000 and udp.DstPort <= 18000))"
-FILTER_I          = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
-FILTER_F          = "(udp.PayloadLength >= 53 and udp.PayloadLength <= 170) and (udp.DstPort >= 10011 and udp.DstPort <= 10020)"
-FILTER_O          = "udp.DstPort >= 10010 and udp.DstPort <= 10020 and udp.PayloadLength >= 35"
+FILTER_I         = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
+FILTER_F         = "(udp.PayloadLength >= 53 and udp.PayloadLength <= 170) and (udp.DstPort >= 10011 and udp.DstPort <= 10020)"
+FILTER_O         = "udp.DstPort >= 10010 and udp.DstPort <= 10020 and udp.PayloadLength >= 35"
 FILTER_AIMLAG     = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
 
 MAX_PACKETS = 80
@@ -577,7 +577,6 @@ def hotkey_loop():
                 if is_freeze and f_time > 0 and (curr_t - f_time >= FREEZE_AUTO_DISABLE_SEC):
                     toggle_freeze()
 
-            # Chỉ cho phép kích hoạt hotkey chức năng khi đang ở tab 0 (Fake Lag)
             if net_state.current_tab == 0:
                 cur_t = keyboard.is_pressed(app_config.tele_hotkey.key)
                 if cur_t and not tp: toggle_tele()
@@ -594,6 +593,8 @@ def hotkey_loop():
                 cur_a = keyboard.is_pressed(app_config.aimlag_hotkey.key)
                 if cur_a and not ap: toggle_aimlag_arm()
                 ap = cur_a
+            else:
+                tp = fp = gp = ap = False
 
             cur_h = keyboard.is_pressed(app_config.hide_hotkey.key)
             if cur_h and not hp: signals.toggle_visibility.emit()
@@ -675,13 +676,20 @@ class VectorHexagonButton(QWidget):
         s = r * 0.44
 
         if self.icon_type == 'network':
-            p.drawEllipse(QPointF(cx, cy - s*0.2), s*0.7, s*0.7)
-            p.drawLine(QPointF(cx - s*0.5, cy - s*0.2), QPointF(cx + s*0.5, cy - s*0.2))
-            p.drawLine(QPointF(cx, cy - s*0.9), QPointF(cx, cy + s*0.5))
-            path.moveTo(cx - s*0.4, cy + s*0.5)
-            path.lineTo(cx, cy + s*0.9)
-            path.lineTo(cx + s*0.4, cy + s*0.5)
-            p.drawPath(path)
+            p.drawEllipse(QPointF(cx, cy - s*0.6), s*0.28, s*0.28)
+            p.drawEllipse(QPointF(cx - s*0.7, cy + s*0.6), s*0.28, s*0.28)
+            p.drawEllipse(QPointF(cx + s*0.7, cy + s*0.6), s*0.28, s*0.28)
+            p.drawLine(QPointF(cx, cy - s*0.32), QPointF(cx - s*0.45, cy + s*0.35))
+            p.drawLine(QPointF(cx, cy - s*0.32), QPointF(cx + s*0.45, cy + s*0.35))
+            p.drawLine(QPointF(cx - s*0.4, cy + s*0.6), QPointF(cx + s*0.4, cy + s*0.6))
+
+        elif self.icon_type == 'target':
+            p.drawEllipse(QPointF(cx, cy), s*0.85, s*0.85)
+            p.drawEllipse(QPointF(cx, cy), s*0.35, s*0.35)
+            p.drawLine(QPointF(cx - s*1.15, cy), QPointF(cx - s*0.5, cy))
+            p.drawLine(QPointF(cx + s*0.5, cy), QPointF(cx + s*1.15, cy))
+            p.drawLine(QPointF(cx, cy - s*1.15), QPointF(cx, cy - s*0.5))
+            p.drawLine(QPointF(cx, cy + s*0.5), QPointF(cx, cy + s*1.15))
 
         elif self.icon_type == 'user':
             p.drawEllipse(QPointF(cx, cy - s*0.45), s*0.4, s*0.4)
@@ -736,7 +744,7 @@ class VectorHexagonButton(QWidget):
 
         p.end()
 
-# ================= TOP LEFT HONEYCOMB OVERLAY =================
+# ================= TOP LEFT HONEYCOMB OVERLAY (GÓC TRÁI MÀN HÌNH) =================
 class TopLeftHoneycombOverlay(QWidget):
     def __init__(self):
         super().__init__()
@@ -757,7 +765,7 @@ class TopLeftHoneycombOverlay(QWidget):
         self.hex_buttons = {}
 
         nodes = [
-            (center_x, center_y, 'network', "Fake Lag (Bấm mở/tắt Menu)", False, 0),
+            (center_x, center_y, 'network', "Fake Lag (Bấm mở Menu)", False, 0),
             (center_x - dx/2, center_y - dy, 'user', "Thông Tin Máy & Key", False, 2),
             (center_x + dx/2, center_y - dy, 'shield', "Bảo vệ Antiban (Bảo trì)", True, 4),
             (center_x - dx, center_y, 'diamond', "Chức Năng VIP (Bảo trì)", True, 4),
@@ -1158,7 +1166,7 @@ class LoginWidget(QWidget):
         layout.setContentsMargins(14, 8, 14, 14)
         layout.setSpacing(5)
 
-        layout.addWidget(TopBar("ZeroX Cheat  /    Login", on_close=on_close_callback, on_minimize=on_minimize_callback))
+        layout.addWidget(TopBar("ZeroX Cheat  /   Login", on_close=on_close_callback, on_minimize=on_minimize_callback))
         layout.addSpacing(6)
 
         lbl_key = QLabel("LICENSE KEY")
@@ -1618,7 +1626,7 @@ class SettingTabPage(QWidget):
         btn.setText(f"{text}: {'ON' if enabled else 'OFF'}")
         color = "#00ff66" if enabled else "#9ca3af"
         btn.setStyleSheet(f"""
-            QPushButton {
+            QPushButton {{
                 background-color: #0e1117;
                 color: {color};
                 border: 1px solid #27272a;
@@ -1626,8 +1634,8 @@ class SettingTabPage(QWidget):
                 font-size: 9.5px;
                 font-weight: 700;
                 font-family: 'Segoe UI', Arial;
-            }
-            QPushButton:hover { background-color: #141821; border-color: #3f3f46; color: #ffffff; }
+            }}
+            QPushButton:hover {{ background-color: #141821; border-color: #3f3f46; color: #ffffff; }}
         """)
 
     def update_all_buttons(self):
@@ -1731,7 +1739,7 @@ class InfoTabPage(QWidget):
         self.lbl_expiry.setText(f"Thời hạn còn lại: {time_str}")
         self.lbl_user.setText(f"Tên hiển thị: <span style='color:#22c55e; font-weight:bold;'>✔ {app_config.custom_nickname}</span>")
 
-# TAB 3: FEEDBACK & CHAT
+# TAB 3: FEEDBACK & CHAT (LƯU CHAT VPS + DISCORD WEBHOOK)
 class FeedbackChatTabPage(QWidget):
     def __init__(self, parent_widget, parent=None):
         super().__init__(parent)
@@ -1955,7 +1963,7 @@ class FeedbackChatTabPage(QWidget):
 
         threading.Thread(target=_send_vps, daemon=True).start()
 
-# TAB 4: COMING SOON
+# TAB 4: COMING SOON (CHO 3 Ô BẢO TRÌ)
 class ComingSoonTabPage(QWidget):
     def __init__(self, parent_widget, parent=None):
         super().__init__(parent)
@@ -2026,11 +2034,6 @@ class KeybindsWidget(QWidget):
         signals.open_tab_requested.connect(self.switch_tab_direct)
 
     def switch_tab_direct(self, index: int):
-        # Nếu bấm vào tab đang được bật, tiến hành ẩn bảng điều khiển (toggle visibility)
-        if net_state.current_tab == index:
-            signals.toggle_visibility.emit()
-            return
-
         if net_state.current_tab == 0 and index != 0:
             stop_all_features()
         net_state.current_tab = index
@@ -2297,10 +2300,23 @@ class MainContainerWindow(QWidget):
 
         signals.toggle_visibility.connect(self.toggle_visibility)
         signals.key_expired.connect(self.handle_key_expired)
-        signals.open_tab_requested.connect(self.bring_to_front)
+        signals.open_tab_requested.connect(self.handle_tab_request)
 
         self._drag = False
         self._pos = None
+
+    def handle_tab_request(self, index: int):
+        # Nếu đang ở tab được yêu cầu và cửa sổ đang hiển thị -> ẩn cửa sổ đi (toggle tắt tab)
+        if net_state.is_injected and net_state.current_tab == index and self.isVisible():
+            self.hide()
+        else:
+            if not self.isVisible():
+                self.show()
+            self.raise_()
+            self.activateWindow()
+            if net_state.is_injected:
+                self.stack.setCurrentIndex(5)
+                self.keybinds_view.switch_tab_direct(index)
 
     def bring_to_front(self, _):
         if not self.isVisible():
@@ -2392,7 +2408,9 @@ def cleanup_and_exit():
     stop_all_features()
     try: keyboard.unhook_all()
     except Exception: pass
-    QApplication.quit()
+    Application = QApplication.instance()
+    if Application:
+        Application.quit()
     os._exit(0)
 
 if __name__ == '__main__':
