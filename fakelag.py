@@ -60,7 +60,7 @@ except ImportError:
     from PyQt6.QtGui import QColor, QPainter, QBrush, QPen, QFont, QLinearGradient, QRadialGradient, QPolygonF, QPainterPath, QGuiApplication
 
 # ================= CẤU HÌNH HỆ THỐNG =================
-VPS_BASE_URL = "http://103.78.3.222"
+VPS_BASE_URL = "http://103.78.3.222:53689"
 VPS_VERIFY_URL = f"{VPS_BASE_URL}/api/verify_key"
 VPS_CHAT_URL = f"{VPS_BASE_URL}/api/chat"
 GET_KEY_URL = f"{VPS_BASE_URL}/"
@@ -1748,7 +1748,7 @@ class InfoTabPage(QWidget):
         self.lbl_expiry.setText(f"Thời hạn còn lại: {time_str}")
         self.lbl_user.setText(f"Tên hiển thị: <span style='color:#22c55e; font-weight:bold;'>✔ {app_config.custom_nickname}</span>")
 
-# TAB 3: FEEDBACK & CHAT (ĐỒNG BỘ PORT 80)
+# TAB 3: FEEDBACK & CHAT (ĐÃ FIX KHÔNG HIỂN THỊ CHAT)
 class FeedbackChatTabPage(QWidget):
     def __init__(self, parent_widget, parent=None):
         super().__init__(parent)
@@ -1831,7 +1831,6 @@ class FeedbackChatTabPage(QWidget):
         self.chat_box.setReadOnly(True)
         self.chat_box.setFixedHeight(85)
         self.chat_box.setStyleSheet("background-color: #11141a; border: 1px solid #1c202a; border-radius: 5px; color: #ffffff; font-size: 10px; font-family: 'Consolas', monospace; padding: 3px;")
-        self.chat_box.setHtml("<div style='color:#94a3b8; font-style:italic;'>Đang kết nối chat server...</div>")
         chat_layout.addWidget(self.chat_box)
 
         send_row = QHBoxLayout()
@@ -1857,7 +1856,6 @@ class FeedbackChatTabPage(QWidget):
         self.sub_stack.addWidget(chat_view)
         layout.addWidget(self.sub_stack)
 
-        self.cached_messages = []
         self.switch_sub_tab(0)
 
         self.chat_timer = QTimer(self)
@@ -1890,18 +1888,10 @@ class FeedbackChatTabPage(QWidget):
                 if r.status_code == 200:
                     data = r.json()
                     messages = data.get("messages", [])
-                    self.cached_messages = messages
                     QTimer.singleShot(0, lambda: self._render_messages(messages))
-                else:
-                    QTimer.singleShot(0, lambda: self._show_error(f"Lỗi tải chat ({r.status_code})"))
             except Exception as e:
                 debug_log(f"Fetch chat error: {e}")
-                if not self.cached_messages:
-                    QTimer.singleShot(0, lambda: self._show_error("Không thể kết nối VPS chat..."))
         threading.Thread(target=_fetch, daemon=True).start()
-
-    def _show_error(self, err_msg):
-        self.chat_box.setHtml(f"<div style='color:#ef4444; font-style:italic;'>[!] {err_msg}</div>")
 
     def _render_messages(self, messages):
         html_lines = []
@@ -1980,15 +1970,6 @@ class FeedbackChatTabPage(QWidget):
         user_name = app_config.custom_nickname
         self.chat_input.setText("")
 
-        local_msg = {
-            "time": datetime.now().strftime("%H:%M"),
-            "role": role,
-            "user": user_name,
-            "text": text
-        }
-        self.cached_messages.append(local_msg)
-        self._render_messages(self.cached_messages)
-
         def _send_vps():
             try:
                 r = requests.post(VPS_CHAT_URL, json={
@@ -1999,10 +1980,9 @@ class FeedbackChatTabPage(QWidget):
                 if r.status_code == 200:
                     data = r.json()
                     if "messages" in data:
-                        self.cached_messages = data["messages"]
-                        QTimer.singleShot(0, lambda: self._render_messages(self.cached_messages))
+                        QTimer.singleShot(0, lambda: self._render_messages(data["messages"]))
             except Exception as e:
-                debug_log(f"Send chat VPS error: {e}")
+                debug_log(f"Send chat error: {e}")
             finally:
                 self.fetch_vps_chat()
 
