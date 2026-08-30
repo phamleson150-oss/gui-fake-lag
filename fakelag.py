@@ -1,3 +1,4 @@
+# ================= ZEROX CLIENT APP (PYQT6) =================
 import os
 import sys
 import threading
@@ -46,7 +47,7 @@ try:
         QPushButton, QFrame, QStackedWidget, QLineEdit, QGridLayout,
         QTextEdit
     )
-    from PyQt6.QtCore import Qt, pyqtSignal, QObject, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QBuffer, QIODevice, QRectF
+    from PyQt6.QtCore import Qt, pyqtSignal, QObject, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QBuffer, QIODevice
     from PyQt6.QtGui import QColor, QPainter, QBrush, QPen, QFont, QLinearGradient, QRadialGradient, QPolygonF, QPainterPath, QGuiApplication
 except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "PyQt6"])
@@ -55,7 +56,7 @@ except ImportError:
         QPushButton, QFrame, QStackedWidget, QLineEdit, QGridLayout,
         QTextEdit
     )
-    from PyQt6.QtCore import Qt, pyqtSignal, QObject, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QBuffer, QIODevice, QRectF
+    from PyQt6.QtCore import Qt, pyqtSignal, QObject, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QBuffer, QIODevice
     from PyQt6.QtGui import QColor, QPainter, QBrush, QPen, QFont, QLinearGradient, QRadialGradient, QPolygonF, QPainterPath, QGuiApplication
 
 # ================= CẤU HÌNH HỆ THỐNG =================
@@ -68,9 +69,9 @@ LICENSE_FILE = "zerox_license.json"
 DISCORD_FEEDBACK_WEBHOOK = "https://discord.com/api/webhooks/1543470614025863308/SD9lOHs2pxJZFrdFFuYQMBOkKAF_6xgY8xetSagvXEU8fUc4O5e_jriDdIIbO1vylQrL"
 DISCORD_CHAT_WEBHOOK = "https://discord.com/api/webhooks/1543478594439880857/fNw9bdIjZP5-1dRfflPKlVLVPRJN4Qz67DZ-E31Y4ArDQGlVOS_M3XTDREOv7_VueEwn"
 
-APP_VERSION = "1.3.5"
+APP_VERSION = "1.3.6"
 BUILD_DATE = "30/08/2026"
-BUILD_TIME = "11:30:00"
+BUILD_TIME = "12:00:00"
 
 def get_current_hwid():
     try:
@@ -104,23 +105,24 @@ def save_license_key(key_str):
 
 def verify_key_with_vps(key_str):
     if not key_str:
-        return False, "Vui lòng nhập mã Key!", 0
+        return False, "Vui lòng nhập mã Key!", 0, "FREE"
     try:
         url = f"{VPS_VERIFY_URL}?key={urllib.parse.quote(key_str)}&hwid={CURRENT_HWID}"
         response = requests.get(url, timeout=4)
         res_data = response.json()
         valid = res_data.get("valid", False) or res_data.get("success", False)
         msg = res_data.get("msg", "Lỗi xác thực")
-        
+        role = res_data.get("role", "FREE")
+         
         if "remaining_seconds" in res_data:
             rem = float(res_data["remaining_seconds"])
             expires_at = -1.0 if rem == -1 else (time.time() + rem)
         else:
             expires_at = float(res_data.get("expires_at", -1))
-            
-        return valid, msg, expires_at
+             
+        return valid, msg, expires_at, role
     except Exception:
-        return False, "Lỗi kết nối VPS!", 0
+        return False, "Lỗi kết nối VPS!", 0, "FREE"
 
 # ================= WIN32 EMULATOR DETECTOR =================
 class RECT(ctypes.Structure):
@@ -188,9 +190,9 @@ def is_emulator_in_foreground():
 
 # ================= NETWORK FILTERS =================
 FILTER_FREEZE_FIX = "udp and ((udp.SrcPort >= 7000 and udp.SrcPort <= 18000) or (udp.DstPort >= 7000 and udp.DstPort <= 18000))"
-FILTER_I          = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
-FILTER_F          = "(udp.PayloadLength >= 53 and udp.PayloadLength <= 170) and (udp.DstPort >= 10011 and udp.DstPort <= 10020)"
-FILTER_O          = "udp.DstPort >= 10010 and udp.DstPort <= 10020 and udp.PayloadLength >= 35"
+FILTER_I         = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
+FILTER_F         = "(udp.PayloadLength >= 53 and udp.PayloadLength <= 170) and (udp.DstPort >= 10011 and udp.DstPort <= 10020)"
+FILTER_O         = "udp.DstPort >= 10010 and udp.DstPort <= 10020 and udp.PayloadLength >= 35"
 FILTER_AIMLAG     = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
 
 MAX_PACKETS = 80
@@ -225,15 +227,16 @@ class AppConfig:
         self.aimlag_hotkey = HotkeyConfig(key='c')
         self.hide_hotkey = HotkeyConfig(key='f7')
         self.stream_hotkey = HotkeyConfig(key='f8')
-        
+         
         self.beep_tele = True
         self.beep_freeze = True
         self.beep_ghost = True
         self.beep_aimlag = True
-        
+         
         self.stream_mode = False
         self.fix_dame_enabled = True
         self.custom_nickname = DEFAULT_USERNAME
+        self.nickname_locked = False
 
 app_config = AppConfig()
 
@@ -248,15 +251,16 @@ def load_config():
                 app_config.aimlag_hotkey.key = data.get('aimlag_hotkey', 'c')
                 app_config.hide_hotkey.key = data.get('hide_hotkey', 'f7')
                 app_config.stream_hotkey.key = data.get('stream_hotkey', 'f8')
-                
+                 
                 app_config.beep_tele = data.get('beep_tele', True)
                 app_config.beep_freeze = data.get('beep_freeze', True)
                 app_config.beep_ghost = data.get('beep_ghost', True)
                 app_config.beep_aimlag = data.get('beep_aimlag', True)
-                
+                 
                 app_config.stream_mode = data.get('stream_mode', False)
                 app_config.fix_dame_enabled = data.get('fix_dame_enabled', True)
                 app_config.custom_nickname = data.get('custom_nickname', DEFAULT_USERNAME)
+                app_config.nickname_locked = data.get('nickname_locked', False)
     except Exception as e:
         debug_log(f"Config load error: {e}")
 
@@ -275,7 +279,8 @@ def save_config():
             'beep_aimlag': app_config.beep_aimlag,
             'stream_mode': app_config.stream_mode,
             'fix_dame_enabled': app_config.fix_dame_enabled,
-            'custom_nickname': app_config.custom_nickname
+            'custom_nickname': app_config.custom_nickname,
+            'nickname_locked': app_config.nickname_locked
         }
         with open(HOTKEY_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2)
@@ -323,7 +328,7 @@ class NetState:
         self.tele_mode = False
         self.freeze_mode = False
         self.ghost_mode = False
-        
+         
         self.aimlag_armed = False
         self.mouse_held = False
         self.current_tab = 0
@@ -333,8 +338,9 @@ class NetState:
         self.is_injected = False
         self.active_key = ""
         self.key_expires_at = -1
+        self.user_role = "FREE"
         self.cached_ip = "127.0.0.1"
-        
+         
         self.freeze_active_time = 0.0
 
 net_state = NetState()
@@ -402,7 +408,7 @@ class DivertSession:
                 except Exception:
                     pass
                 self.handle = None
-            
+             
             pkts_to_send = list(self.packets)
             self.packets.clear()
 
@@ -577,7 +583,6 @@ def hotkey_loop():
                 if is_freeze and f_time > 0 and (curr_t - f_time >= FREEZE_AUTO_DISABLE_SEC):
                     toggle_freeze()
 
-            # CHỈ CHO PHÉP NHẤN HOTKEY KHI ĐANG Ở TAB 0 (FAKE LAG)
             if net_state.current_tab == 0:
                 cur_t = keyboard.is_pressed(app_config.tele_hotkey.key)
                 if cur_t and not tp: toggle_tele()
@@ -594,8 +599,6 @@ def hotkey_loop():
                 cur_a = keyboard.is_pressed(app_config.aimlag_hotkey.key)
                 if cur_a and not ap: toggle_aimlag_arm()
                 ap = cur_a
-            else:
-                tp = gp = fp = ap = False
 
             cur_h = keyboard.is_pressed(app_config.hide_hotkey.key)
             if cur_h and not hp: signals.toggle_visibility.emit()
@@ -677,10 +680,10 @@ class VectorHexagonButton(QWidget):
         s = r * 0.44
 
         if self.icon_type == 'network':
-            # Biểu tượng mạng / Wifi sóng
-            p.drawEllipse(QPointF(cx, cy + s*0.6), s*0.2, s*0.2)
-            p.drawArc(QRectF(cx - s*0.5, cy + s*0.0, s*1.0, s*1.0), 30 * 16, 120 * 16)
-            p.drawArc(QRectF(cx - s*0.8, cy - s*0.4, s*1.6, s*1.6), 30 * 16, 120 * 16)
+            # Network / Signal waves icon for Fake Lag tab
+            p.drawEllipse(QPointF(cx, cy + s*0.6), s*0.18, s*0.18)
+            p.drawArc(QRectF(cx - s*0.6, cy - s*0.2, s*1.2, s*1.2), 30 * 16, 120 * 16)
+            p.drawArc(QRectF(cx - s*1.0, cy - s*0.6, s*2.0, s*2.0), 30 * 16, 120 * 16)
 
         elif self.icon_type == 'user':
             p.drawEllipse(QPointF(cx, cy - s*0.45), s*0.4, s*0.4)
@@ -735,7 +738,7 @@ class VectorHexagonButton(QWidget):
 
         p.end()
 
-# ================= TOP LEFT HONEYCOMB OVERLAY (GÓC TRÁI MÀN HÌNH) =================
+# ================= TOP LEFT HONEYCOMB OVERLAY =================
 class TopLeftHoneycombOverlay(QWidget):
     def __init__(self):
         super().__init__()
@@ -795,7 +798,7 @@ class SlidingStackedWidget(QStackedWidget):
     def slide_to_index(self, target_idx: int):
         if self._is_animating or target_idx == self.currentIndex():
             return
-        
+         
         self._is_animating = True
         curr_idx = self.currentIndex()
         direction = 1 if target_idx > curr_idx else -1
@@ -1013,7 +1016,7 @@ class InitialGuiWidget(QWidget):
         layout.setContentsMargins(14, 8, 14, 14)
         layout.setSpacing(10)
 
-        layout.addWidget(TopBar("GUI 1.0.5", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
+        layout.addWidget(TopBar("GUI 1.0.6", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
         layout.addSpacing(15)
 
         status_lbl = QLabel("Enable Inject Connect")
@@ -1261,10 +1264,11 @@ class LoginWidget(QWidget):
         QApplication.processEvents()
 
         user_key = self.key_input.text().strip()
-        ok, msg, exp_at = verify_key_with_vps(user_key)
+        ok, msg, exp_at, role = verify_key_with_vps(user_key)
         if ok:
             net_state.active_key = user_key
             net_state.key_expires_at = exp_at
+            net_state.user_role = role
             save_license_key(user_key)
             self.status_msg.setStyleSheet("color: #00ff66; font-size: 9px; font-weight: bold;")
             self.status_msg.setText(msg)
@@ -1617,7 +1621,7 @@ class SettingTabPage(QWidget):
         btn.setText(f"{text}: {'ON' if enabled else 'OFF'}")
         color = "#00ff66" if enabled else "#9ca3af"
         btn.setStyleSheet(f"""
-            QPushButton {{
+            QPushButton {
                 background-color: #0e1117;
                 color: {color};
                 border: 1px solid #27272a;
@@ -1625,8 +1629,8 @@ class SettingTabPage(QWidget):
                 font-size: 9.5px;
                 font-weight: 700;
                 font-family: 'Segoe UI', Arial;
-            }}
-            QPushButton:hover {{ background-color: #141821; border-color: #3f3f46; color: #ffffff; }}
+            }
+            QPushButton:hover { background-color: #141821; border-color: #3f3f46; color: #ffffff; }
         """)
 
     def update_all_buttons(self):
@@ -1709,20 +1713,24 @@ class InfoTabPage(QWidget):
     def update_info(self):
         curr_key = net_state.active_key or load_saved_key() or "KEY"
         exp_at = net_state.key_expires_at
-        
-        if exp_at == -1:
+        role = net_state.user_role.upper()
+         
+        if role == "ADMIN":
+            role_badge = "<span style='color:#ef4444; font-weight:800;'>[ADMIN]</span>"
+        elif role == "VIP" or exp_at == -1:
             role_badge = "<span style='color:#f59e0b; font-weight:800;'>[VIP]</span>"
+        else:
+            role_badge = "<span style='color:#22c55e; font-weight:800;'>[FREE]</span>"
+
+        if exp_at == -1:
             time_str = "Vĩnh viễn"
         elif exp_at > 0:
             rem = max(0, exp_at - time.time())
             days = int(rem // 86400)
             hrs = int((rem % 86400) // 3600)
             mins = int((rem % 3600) // 60)
-            
-            role_badge = "<span style='color:#f59e0b; font-weight:800;'>[VIP]</span>" if (rem > 86400 or days > 0) else "<span style='color:#60a5fa; font-weight:800;'>[FREE]</span>"
             time_str = f"{days}d {hrs:02d}h {mins:02d}m" if days > 0 else f"{hrs:02d}h {mins:02d}m"
         else:
-            role_badge = "<span style='color:#ef4444;'>[Hết hạn]</span>"
             time_str = "Hết hạn"
 
         self.lbl_key.setText(f"LICENSE KEY: {curr_key} {role_badge}")
@@ -1730,7 +1738,7 @@ class InfoTabPage(QWidget):
         self.lbl_expiry.setText(f"Thời hạn còn lại: {time_str}")
         self.lbl_user.setText(f"Tên hiển thị: <span style='color:#22c55e; font-weight:bold;'>✔ {app_config.custom_nickname}</span>")
 
-# TAB 3: FEEDBACK & CHAT (ĐÃ FIX: KHÔNG HIỆN KEY Ở FEEDBACK, KHÓA TÊN KHI ĐÃ ĐẶT, GIAO DIỆN CHAT CHUẨN ẢNH)
+# TAB 3: FEEDBACK & CHAT (ĐÃ FIX LAYOUT CHAT VÀ ẨN KEY KHI GỬI FEEDBACK)
 class FeedbackChatTabPage(QWidget):
     def __init__(self, parent_widget, parent=None):
         super().__init__(parent)
@@ -1764,24 +1772,22 @@ class FeedbackChatTabPage(QWidget):
         
         self.name_input = QLineEdit()
         self.name_input.setText(app_config.custom_nickname)
-        self.name_input.setPlaceholderText("Nhập tên bạn muốn đặt...")
         self.name_input.setFixedHeight(22)
         
-        # Kiểm tra nếu đã đặt tên tùy chỉnh thì khóa luôn không cho chỉnh sửa
-        is_custom_saved = (app_config.custom_nickname and app_config.custom_nickname != DEFAULT_USERNAME)
-        if is_custom_saved:
+        if app_config.nickname_locked:
             self.name_input.setReadOnly(True)
-            self.name_input.setStyleSheet("background-color:#12141a; border:1px solid #1c202a; border-radius:4px; color:#38bdf8; font-size:9.5px; font-weight:bold; padding:0 5px;")
+            self.name_input.setStyleSheet("background-color:#0d0f14; border:1px solid #1a1e28; border-radius:4px; color:#22c55e; font-size:9.5px; font-weight:bold; padding:0 5px;")
         else:
+            self.name_input.setPlaceholderText("Nhập tên bạn muốn đặt (cố định sau khi lưu)...")
             self.name_input.setStyleSheet("background-color:#12141a; border:1px solid #1c202a; border-radius:4px; color:#38bdf8; font-size:9.5px; font-weight:bold; padding:0 5px;")
-            self.name_input.returnPressed.connect(self.lock_name_input)
+            self.name_input.editingFinished.connect(self.lock_nickname)
 
         name_row.addWidget(lbl_n)
         name_row.addWidget(self.name_input)
         layout.addLayout(name_row)
 
         self.sub_stack = QStackedWidget()
-        
+         
         # VIEW 1: FEEDBACK
         fb_view = QWidget()
         fb_layout = QVBoxLayout(fb_view)
@@ -1806,7 +1812,7 @@ class FeedbackChatTabPage(QWidget):
         self.send_fb_btn.clicked.connect(self.handle_send_feedback)
         fb_layout.addWidget(self.send_fb_btn)
 
-        # VIEW 2: CHAT TRỰC TIẾP VPS + DISCORD
+        # VIEW 2: CHAT TRỰC TIẾP VPS + DISCORD (FIXED HEIGHT CHO KHỚP ẢNH MẪU)
         chat_view = QWidget()
         chat_layout = QVBoxLayout(chat_view)
         chat_layout.setContentsMargins(0, 2, 0, 0)
@@ -1814,7 +1820,7 @@ class FeedbackChatTabPage(QWidget):
 
         self.chat_box = QTextEdit()
         self.chat_box.setReadOnly(True)
-        self.chat_box.setFixedHeight(85)
+        self.chat_box.setFixedHeight(75)
         self.chat_box.setStyleSheet("background-color: #11141a; border: 1px solid #1c202a; border-radius: 5px; color: #d1d5db; font-size: 9px; font-family: 'Consolas', monospace; padding: 3px;")
         chat_layout.addWidget(self.chat_box)
 
@@ -1847,12 +1853,14 @@ class FeedbackChatTabPage(QWidget):
         self.chat_timer.timeout.connect(self.fetch_vps_chat)
         self.chat_timer.start(3000)
 
-    def lock_name_input(self):
-        val = self.name_input.text().strip()
-        if val:
-            app_config.custom_nickname = val
+    def lock_nickname(self):
+        txt = self.name_input.text().strip()
+        if txt:
+            app_config.custom_nickname = txt
+            app_config.nickname_locked = True
             save_config()
             self.name_input.setReadOnly(True)
+            self.name_input.setStyleSheet("background-color:#0d0f14; border:1px solid #1a1e28; border-radius:4px; color:#22c55e; font-size:9.5px; font-weight:bold; padding:0 5px;")
 
     def switch_sub_tab(self, idx):
         self.sub_stack.setCurrentIndex(idx)
@@ -1864,9 +1872,9 @@ class FeedbackChatTabPage(QWidget):
             self.fetch_vps_chat()
 
     def get_role_tag(self):
-        exp_at = net_state.key_expires_at
-        if exp_at == -1 or (exp_at - time.time()) > 86400:
-            return "VIP"
+        role = net_state.user_role.upper()
+        if role in ["VIP", "ADMIN"]:
+            return role
         return "FREE"
 
     def fetch_vps_chat(self):
@@ -1884,12 +1892,19 @@ class FeedbackChatTabPage(QWidget):
         html_lines = []
         for m in messages:
             t = m.get("time", "00:00")
-            role = m.get("role", "FREE")
+            role = m.get("role", "FREE").upper()
             user = m.get("user", "User")
             txt = m.get("text", "")
-            col = "#f59e0b" if role == "VIP" else "#60a5fa"
+            
+            if role == "ADMIN":
+                col = "#ef4444"
+            elif role == "VIP":
+                col = "#f59e0b"
+            else:
+                col = "#22c55e"
+                
             html_lines.append(f"<span style='color:#6b7280;'>[{t}]</span> <span style='color:{col}; font-weight:bold;'>[{role}]</span> <b>{user}:</b> {txt}")
-        
+         
         self.chat_box.setHtml("<br>".join(html_lines))
         self.chat_box.verticalScrollBar().setValue(self.chat_box.verticalScrollBar().maximum())
 
@@ -1915,9 +1930,9 @@ class FeedbackChatTabPage(QWidget):
 
         def _send():
             try:
-                # LOẠI BỎ HOÀN TOÀN KHÔNG HIỆN KEY TRÊN DISCORD FEEDBACK
+                # Gửi feedback không kèm key theo đúng yêu cầu hình mẫu
                 payload = {
-                    "content": f"📢 **FEEDBACK TỪ [{role}] {user_name}**\n📝 **Nội dung:** {msg}\n💻 **HWID:** `{CURRENT_HWID}`\n🌐 **IP:** `{net_state.cached_ip}`"
+                    "content": f"📸 **BÁO CÁO FEEDBACK / LỖI TỪ PANEL PC**\n\n**Feedback từ User:** {user_name}\n👤 **Username:** `{user_name}`\n📝 **Ghi chú:** {msg}\n💻 **HWID:** `{CURRENT_HWID}`\n🌐 **IP:** `{net_state.cached_ip}`"
                 }
                 if img_data:
                     files = {"file": ("screenshot.png", img_data, "image/png")}
@@ -2023,11 +2038,11 @@ class KeybindsWidget(QWidget):
         self.feedback_page = FeedbackChatTabPage(self)
         self.coming_soon_page = ComingSoonTabPage(self)
 
-        self.tab_stack.addWidget(self.main_page)         # 0: Fake Lag
+        self.tab_stack.addWidget(self.main_page)          # 0: Fake Lag
         self.tab_stack.addWidget(self.setting_page)       # 1: Setting
         self.tab_stack.addWidget(self.info_page)          # 2: Info
         self.tab_stack.addWidget(self.feedback_page)      # 3: Feedback & Chat
-        self.tab_stack.addWidget(self.coming_soon_page)   # 4: Coming Soon (Bảo trì)
+        self.tab_stack.addWidget(self.coming_soon_page)   # 4: Coming Soon
         layout.addWidget(self.tab_stack)
 
         self.countdown_timer = QTimer(self)
@@ -2049,7 +2064,7 @@ class KeybindsWidget(QWidget):
         curr_idx = self.tab_stack.currentIndex()
         h_map = {0: 175, 1: 175, 2: 220, 3: 205, 4: 160}
         target_h = h_map.get(curr_idx, 180)
-        
+         
         if self.parentWidget() and hasattr(self.parentWidget(), 'resize'):
             p = self.parentWidget().parentWidget() if hasattr(self.parentWidget(), 'parentWidget') else None
             if p and hasattr(p, 'bg_frame'):
@@ -2066,13 +2081,21 @@ class KeybindsWidget(QWidget):
     def update_key_expiry_display(self):
         exp_at = net_state.key_expires_at
         curr_key = net_state.active_key or load_saved_key() or "KEY"
+        role = net_state.user_role.upper()
 
         key_badge = f'<span style="color:#60a5fa; font-weight:700; font-size:9.5px;">[{curr_key}]</span>'
+        
+        if role == "ADMIN":
+            role_badge = '<span style="color:#ef4444; font-weight:800; font-size:9.5px;">[ADMIN]</span>'
+        elif role == "VIP" or exp_at == -1:
+            role_badge = '<span style="color:#f59e0b; font-weight:800; font-size:9.5px;">[VIP]</span>'
+        else:
+            role_badge = '<span style="color:#22c55e; font-weight:800; font-size:9.5px;">[FREE]</span>'
 
         if exp_at == -1:
-            time_badge = '<span style="color:#00ff66; font-size:9.5px;">[Vĩnh viễn]</span>'
+            time_badge = f'{role_badge} <span style="color:#00ff66; font-size:9.5px;">[Vĩnh viễn]</span>'
         elif exp_at <= 0:
-            time_badge = ''
+            time_badge = role_badge
         else:
             rem = exp_at - time.time()
             if rem <= 0:
@@ -2086,7 +2109,7 @@ class KeybindsWidget(QWidget):
                 secs = int(rem % 60)
 
                 time_str = f"{days}d {hrs:02d}h {mins:02d}m {secs:02d}s" if days > 0 else f"{hrs:02d}h {mins:02d}m {secs:02d}s"
-                time_badge = f'<span style="color:#00ff66; font-weight:800; font-size:9.5px;">[{time_str}]</span>'
+                time_badge = f'{role_badge} <span style="color:#00ff66; font-weight:800; font-size:9.5px;">[{time_str}]</span>'
 
         self.top_bar.title_lbl.setText(f"{key_badge} {time_badge}")
 
@@ -2316,14 +2339,15 @@ class MainContainerWindow(QWidget):
     def sync_key_with_server(self):
         if not net_state.is_authenticated or not net_state.active_key:
             return
-        
+         
         def _do_sync():
-            valid, msg, exp_at = verify_key_with_vps(net_state.active_key)
+            valid, msg, exp_at, role = verify_key_with_vps(net_state.active_key)
             if valid:
                 net_state.key_expires_at = exp_at
+                net_state.user_role = role
             else:
                 signals.key_expired.emit()
-                
+                 
         threading.Thread(target=_do_sync, daemon=True).start()
 
     def on_adb_clicked(self):
@@ -2401,12 +2425,9 @@ def cleanup_and_exit():
     os._exit(0)
 
 if __name__ == '__main__':
-    try:
-        if not (ctypes.windll.shell32.IsUserAnAdmin() != 0):
-            ctypes.windll.shell32.ShellExecuteW(None, 'runas', sys.executable, ' '.join(f'"{a}"' for a in sys.argv), None, 1)
-            sys.exit()
-    except Exception:
-        pass
+    if not (ctypes.windll.shell32.IsUserAnAdmin() != 0):
+        ctypes.windll.shell32.ShellExecuteW(None, 'runas', sys.executable, ' '.join(f'"{a}"' for a in sys.argv), None, 1)
+        sys.exit()
 
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
@@ -2424,17 +2445,10 @@ if __name__ == '__main__':
     threading.Thread(target=divert_freeze_fix_dame_worker, daemon=True).start()
     threading.Thread(target=hotkey_loop, daemon=True).start()
 
-    try:
-        mouse_listener = pynput_mouse.Listener(on_click=on_mouse_click)
-        mouse_listener.daemon = True
-        mouse_listener.start()
-    except Exception:
-        pass
+    mouse_listener = pynput_mouse.Listener(on_click=on_mouse_click)
+    mouse_listener.daemon = True
+    mouse_listener.start()
 
-    try:
-        keyboard.add_hotkey('f10', cleanup_and_exit)
-    except Exception:
-        pass
-
+    keyboard.add_hotkey('f10', cleanup_and_exit)
     app.aboutToQuit.connect(cleanup_and_exit)
     sys.exit(app.exec())
