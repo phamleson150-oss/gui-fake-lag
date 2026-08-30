@@ -69,7 +69,7 @@ DISCORD_FEEDBACK_WEBHOOK = "https://discord.com/api/webhooks/1543470614025863308
 DISCORD_CHAT_WEBHOOK = "https://discord.com/api/webhooks/1543478594439880857/fNw9bdIjZP5-1dRfflPKlVLVPRJN4Qz67DZ-E31Y4ArDQGlVOS_M3XTDREOv7_VueEwn"
 
 APP_VERSION = "1.0.9"
-_build_dt = datetime.fromtimestamp(os.path.getmtime(__file__) if os.path.exists(__file__) else time.time())
+_build_dt = datetime.now()
 BUILD_DATE = _build_dt.strftime("%d/%m/%Y")
 BUILD_TIME = _build_dt.strftime("%H:%M:%S")
 
@@ -1887,7 +1887,6 @@ class FeedbackChatTabPage(QWidget):
                 r = requests.get(VPS_CHAT_URL, timeout=3)
                 if r.status_code == 200:
                     data = r.json()
-                    # Hỗ trợ cả list trả về trực tiếp hoặc dict chứa 'messages'
                     messages = data.get("messages", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
                     QTimer.singleShot(0, lambda: self._render_messages(messages))
             except Exception as e:
@@ -2021,7 +2020,6 @@ class AnnouncementOrComingSoonTabPage(QWidget):
         c_layout.setSpacing(6)
 
         if app_config.user_role == "ADMIN":
-            # Giao diện thông báo Admin theo ảnh 2
             title_lbl = QLabel("📢 THÔNG BÁO TỪ ADMIN")
             title_lbl.setStyleSheet("color: #38bdf8; font-size: 11px; font-weight: 800; font-family: 'Segoe UI', Arial;")
             c_layout.addWidget(title_lbl)
@@ -2060,7 +2058,6 @@ class AnnouncementOrComingSoonTabPage(QWidget):
             btn_ok.clicked.connect(lambda: signals.open_tab_requested.emit(0))
             c_layout.addWidget(btn_ok)
         else:
-            # Giao diện Coming Soon cho VIP / FREE
             c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl_cs = QLabel("COMING SOON")
             lbl_cs.setAlignment(Qt.AlignmentFlag.AlignCenter)
