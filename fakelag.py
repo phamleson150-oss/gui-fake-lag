@@ -1441,7 +1441,7 @@ class InitializingWidget(QWidget):
         self.timer.start(24)
 
     def tick_init(self):
-        self.current_progress += 1
+        self.current_progress += 2
         if self.current_progress < 50:
             color = QColor("#00e676")
             css = "#00e676"
@@ -1453,21 +1453,21 @@ class InitializingWidget(QWidget):
             css = "#9d4edd"
 
         self.pbar.set_progress(self.current_progress, color)
-        self.pct_lbl.setText(f"{self.current_progress}%")
+        self.pct_lbl.setText(f"{min(100, self.current_progress)}%")
         self.pct_lbl.setStyleSheet(f"color: {css}; font-size: 12px; font-weight: 700; font-family: 'Segoe UI', Arial;")
 
         if self.current_progress >= 100:
             self.timer.stop()
-            QTimer.singleShot(250, self.on_finish)
+            QTimer.singleShot(150, self.on_finish)
 
-# ================= POPUP THÔNG BÁO TỪ ADMIN =================
+# ================= POPUP THÔNG BÁO TỪ ADMIN (KHUNG ĐEN NÉT ĐỨT + NÚT XANH DƯƠNG) =================
 class AdminNoticeWidget(QWidget):
     def __init__(self, on_understood_callback, on_close_callback, parent=None):
         super().__init__(parent)
         self.on_understood = on_understood_callback
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 10, 14, 14)
+        layout.setContentsMargins(14, 10, 14, 12)
         layout.setSpacing(6)
 
         header_row = QHBoxLayout()
@@ -1515,10 +1515,10 @@ class AdminNoticeWidget(QWidget):
 
     def set_notice(self, title_text, raw_content):
         if title_text:
-            self.header_title.setText(f"📢 {title_text}")
+            self.header_title.setText(f"📢 {str(title_text)}")
         
-        # Tự động chuyển đổi link URL thành thẻ <a href> xanh dương có thể click
-        formatted_html = html.escape(raw_content).replace("\n", "<br>")
+        content_str = str(raw_content or "")
+        formatted_html = html.escape(content_str).replace("\n", "<br>")
         url_pattern = re.compile(r'(https?://[^\s<]+)')
         formatted_html = url_pattern.sub(r'<a href="\1" style="color: #38bdf8; text-decoration: none; font-weight: 600;">\1</a>', formatted_html)
 
@@ -1814,7 +1814,7 @@ class InfoTabPage(QWidget):
         self.lbl_expiry.setText(f"Thời hạn còn lại: {time_str}")
         self.lbl_user.setText(f"Tên hiển thị: <span style='color:#22c55e; font-weight:bold;'>✔ {app_config.custom_nickname}</span>")
 
-# TAB 3: FEEDBACK & CHAT (ĐÃ SỬA HIỂN THỊ ĐẦY ĐỦ THỜI GIAN, NGÀY, ROLE, USER)
+# TAB 3: FEEDBACK & CHAT (HIỂN THỊ ĐỦ NGÀY, GIỜ, ROLE, USER)
 class FeedbackChatTabPage(QWidget):
     def __init__(self, parent_widget, parent=None):
         super().__init__(parent)
@@ -2393,6 +2393,9 @@ class MainContainerWindow(QWidget):
         self.stack = QStackedWidget()
         bg_layout.addWidget(self.stack)
 
+        self.cached_notice_title = "THÔNG BÁO TỪ ADMIN"
+        self.cached_notice_content = "Update esp skeleton\nhttps://discord.gg/fxkyDDshq8"
+
         self.init_gui_view = InitialGuiWidget(self.on_adb_clicked, cleanup_and_exit, self.showMinimized)
         self.adb_loading_view = AdbLoadingWidget(self.on_adb_choice_done, cleanup_and_exit, self.showMinimized)
         self.login_view = LoginWidget(self.on_login_success, cleanup_and_exit, self.showMinimized)
@@ -2456,36 +2459,28 @@ class MainContainerWindow(QWidget):
         self.stack.setCurrentIndex(3)
         self.download_view.start_download()
 
+        # Nạp trước thông báo từ VPS ở background ngay sau khi login
+        def _prefetch_notice():
+            try:
+                r = requests.get(VPS_ANNOUNCE_URL, timeout=3)
+                if r.status_code == 200:
+                    data = r.json().get("data", {})
+                    self.cached_notice_title = data.get("title", self.cached_notice_title)
+                    self.cached_notice_content = data.get("content", self.cached_notice_content)
+            except Exception:
+                pass
+        threading.Thread(target=_prefetch_notice, daemon=True).start()
+
     def on_inject_clicked(self):
         signals.start_tracking.emit()
         self.stack.setCurrentIndex(4)
         self.init_view.start()
 
     def on_init_finished(self):
-        # Lấy thông báo Admin từ VPS trước khi vào menu Fake lag
-        def _fetch_notice():
-            notice_title = "THÔNG BÁO TỪ ADMIN"
-            notice_content = "Update esp skeleton\nhttps://discord.gg/fxkyDDshq8"
-            show_popup = True
-            try:
-                r = requests.get(VPS_ANNOUNCE_URL, timeout=3)
-                if r.status_code == 200:
-                    data = r.json().get("data", {})
-                    notice_title = data.get("title", notice_title)
-                    notice_content = data.get("content", notice_content)
-                    show_popup = data.get("enabled", True)
-            except Exception:
-                pass
-
-            if show_popup:
-                QTimer.singleShot(0, lambda: self._display_admin_notice(notice_title, notice_content))
-            else:
-                QTimer.singleShot(0, self.on_notice_understood)
-
-        threading.Thread(target=_fetch_notice, daemon=True).start()
-
-    def _display_admin_notice(self, title_txt, content_txt):
-        self.notice_view.set_notice(title_txt, content_txt)
+        # Chuyển ngay lập tức sang Popup thông báo Admin (không chờ đợi mạng)
+        self.notice_view.set_notice(self.cached_notice_title, self.cached_notice_content)
+        self.resize(320, 195)
+        self.bg_frame.setGeometry(0, 0, 320, 195)
         self.stack.setCurrentIndex(5)
 
     def on_notice_understood(self):
