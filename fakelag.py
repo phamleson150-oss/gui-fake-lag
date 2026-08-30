@@ -59,14 +59,16 @@ except ImportError:
     from PyQt6.QtGui import QColor, QPainter, QBrush, QPen, QFont, QLinearGradient, QRadialGradient, QPolygonF, QPainterPath, QGuiApplication
 
 # ================= CẤU HÌNH HỆ THỐNG =================
-VPS_VERIFY_URL = "http://103.78.3.222:53689/api/verify_key"
-GET_KEY_URL = "http://103.78.3.222:53689/"
+VPS_BASE_URL = "http://103.78.3.222:53689"
+VPS_VERIFY_URL = f"{VPS_BASE_URL}/api/verify_key"
+VPS_CHAT_URL = f"{VPS_BASE_URL}/api/chat"
+GET_KEY_URL = f"{VPS_BASE_URL}/"
 LICENSE_FILE = "zerox_license.json"
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1543470614025863308/SD9lOHs2pxJZFrdFFuYQMBOkKAF_6xgY8xetSagvXEU8fUc4O5e_jriDdIIbO1vylQrL"
 
-APP_VERSION = "1.3.4"
+APP_VERSION = "1.3.5"
 BUILD_DATE = "30/08/2026"
-BUILD_TIME = "11:00:00"
+BUILD_TIME = "11:20:00"
 
 def get_current_hwid():
     try:
@@ -79,7 +81,7 @@ def get_current_hwid():
     return "HWID-DEFAULT-001"
 
 CURRENT_HWID = get_current_hwid()
-LOCAL_USERNAME = os.environ.get('USERNAME', os.environ.get('USER', 'User'))
+DEFAULT_USERNAME = os.environ.get('USERNAME', os.environ.get('USER', 'User'))
 
 def load_saved_key():
     try:
@@ -229,6 +231,7 @@ class AppConfig:
         
         self.stream_mode = False
         self.fix_dame_enabled = True
+        self.custom_nickname = DEFAULT_USERNAME
 
 app_config = AppConfig()
 
@@ -251,6 +254,7 @@ def load_config():
                 
                 app_config.stream_mode = data.get('stream_mode', False)
                 app_config.fix_dame_enabled = data.get('fix_dame_enabled', True)
+                app_config.custom_nickname = data.get('custom_nickname', DEFAULT_USERNAME)
     except Exception as e:
         debug_log(f"Config load error: {e}")
 
@@ -268,7 +272,8 @@ def save_config():
             'beep_ghost': app_config.beep_ghost,
             'beep_aimlag': app_config.beep_aimlag,
             'stream_mode': app_config.stream_mode,
-            'fix_dame_enabled': app_config.fix_dame_enabled
+            'fix_dame_enabled': app_config.fix_dame_enabled,
+            'custom_nickname': app_config.custom_nickname
         }
         with open(HOTKEY_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2)
@@ -306,7 +311,6 @@ class AppSignals(QObject):
     start_tracking = pyqtSignal()
     key_expired = pyqtSignal()
     open_tab_requested = pyqtSignal(int)
-    show_maint_toast = pyqtSignal(str)
 
 signals = AppSignals()
 
@@ -325,7 +329,7 @@ class NetState:
         self.is_injected = False
         self.active_key = ""
         self.key_expires_at = -1
-        self.cached_ip = "Đang tải..."
+        self.cached_ip = "127.0.0.1"
         
         self.freeze_active_time = 0.0
 
@@ -599,7 +603,7 @@ def hotkey_loop():
         except Exception:
             time.sleep(0.1)
 
-# ================= VECTOR HEXAGON BUTTON =================
+# ================= VECTOR HEXAGON BUTTON (TỰ VẼ BẰNG QPAINTER) =================
 class VectorHexagonButton(QWidget):
     clicked = pyqtSignal()
 
@@ -747,23 +751,18 @@ class TopLeftHoneycombOverlay(QWidget):
         nodes = [
             (center_x, center_y, 'target', "Fake Lag (Bấm mở Menu)", False, 0),
             (center_x - dx/2, center_y - dy, 'user', "Thông Tin Máy & Key", False, 2),
-            (center_x + dx/2, center_y - dy, 'shield', "Bảo vệ Antiban", True, "Antiban"),
-            (center_x - dx, center_y, 'diamond', "Chức Năng VIP", True, "VIP"),
+            (center_x + dx/2, center_y - dy, 'shield', "Bảo vệ Antiban (Bảo trì)", True, 4),
+            (center_x - dx, center_y, 'diamond', "Chức Năng VIP (Bảo trì)", True, 4),
             (center_x + dx, center_y, 'chat', "Feedback & Chat", False, 3),
-            (center_x - dx/2, center_y + dy, 'bars', "Thống Kê", True, "Statistics"),
+            (center_x - dx/2, center_y + dy, 'bars', "Thống Kê (Bảo trì)", True, 4),
             (center_x + dx/2, center_y + dy, 'gear', "Cài Đặt", False, 1)
         ]
 
-        for x, y, icon_t, tip, is_maint, target in nodes:
+        for x, y, icon_t, tip, is_maint, target_idx in nodes:
             btn = VectorHexagonButton(icon_t, tip, is_maintenance=is_maint, radius=r, parent=self)
             btn.move(int(x - r), int(y - r))
-            
-            if is_maint:
-                btn.clicked.connect(lambda t=target: signals.show_maint_toast.emit(t))
-            else:
-                btn.clicked.connect(lambda idx=target: signals.open_tab_requested.emit(idx))
-            
-            self.hex_buttons[target] = btn
+            btn.clicked.connect(lambda idx=target_idx: signals.open_tab_requested.emit(idx))
+            self.hex_buttons[target_idx] = btn
 
         self.target_hwnd = None
         self.track_timer = QTimer(self)
@@ -804,11 +803,10 @@ class TopLeftHoneycombOverlay(QWidget):
 
     def update_active_node(self, active_idx):
         for k, btn in self.hex_buttons.items():
-            if not btn.is_maintenance:
-                btn.is_active = (k == active_idx)
-                btn.update()
+            btn.is_active = (k == active_idx)
+            btn.update()
 
-# ================= SLIDING STACKED WIDGET (SỬA LỖI __INIT__) =================
+# ================= SLIDING STACKED WIDGET =================
 class SlidingStackedWidget(QStackedWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1036,7 +1034,7 @@ class InitialGuiWidget(QWidget):
         layout.setContentsMargins(14, 8, 14, 14)
         layout.setSpacing(10)
 
-        layout.addWidget(TopBar("GUI 1.0.4", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
+        layout.addWidget(TopBar("GUI 1.0.5", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
         layout.addSpacing(15)
 
         status_lbl = QLabel("Enable Inject Connect")
@@ -1075,7 +1073,7 @@ class InitialGuiWidget(QWidget):
         self._secret_clicks += 1
         if self._secret_clicks >= 3:
             self._secret_clicks = 0
-            webbrowser.open("http://103.78.3.222:53689/key.html?admin=1")
+            webbrowser.open(f"{VPS_BASE_URL}/key.html?admin=1")
 
 class AdbLoadingWidget(QWidget):
     def __init__(self, on_choice_selected, on_close_callback, on_minimize_callback, parent=None):
@@ -1538,6 +1536,8 @@ class KeyExpiredWidget(QWidget):
         layout.addLayout(btn_box)
 
 # ================= TAB CONTENT PAGES =================
+
+# TAB 0: FAKE LAG
 class MainTabPage(QWidget):
     def __init__(self, parent_widget, parent=None):
         super().__init__(parent)
@@ -1592,6 +1592,7 @@ class MainTabPage(QWidget):
             save_config()
         hook = keyboard.on_release(on_key)
 
+# TAB 1: SETTING
 class SettingTabPage(QWidget):
     def __init__(self, parent_widget, parent=None):
         super().__init__(parent)
@@ -1670,63 +1671,70 @@ class SettingTabPage(QWidget):
         self.update_all_buttons()
         stop_all_features()
 
+# TAB 2: INFO (ĐÃ FIX TOÀN DIỆN LỖI HIỂN THỊ)
 class InfoTabPage(QWidget):
     def __init__(self, parent_widget, parent=None):
         super().__init__(parent)
         self.parent_widget = parent_widget
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 2, 4, 4)
-        layout.setSpacing(3)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(4)
 
-        box = QFrame()
-        box.setStyleSheet("background-color: #0e1117; border: 1px solid #1c202a; border-radius: 6px; padding: 6px;")
-        box_layout = QVBoxLayout(box)
-        box_layout.setContentsMargins(6, 4, 6, 4)
-        box_layout.setSpacing(2)
+        self.card = QWidget()
+        self.card.setStyleSheet("""
+            QWidget {
+                background-color: #0e1117;
+                border: 1px solid #1c202a;
+                border-radius: 6px;
+            }
+        """)
+        card_layout = QVBoxLayout(self.card)
+        card_layout.setContentsMargins(8, 6, 8, 6)
+        card_layout.setSpacing(3)
 
-        title = QLabel("Thông tin Tài khoản & Máy")
-        title.setStyleSheet("color: #d1d5db; font-size: 10px; font-weight: 700; font-family: 'Segoe UI', Arial; border-bottom: 1px solid #1f242d; padding-bottom: 3px; margin-bottom: 2px;")
-        box_layout.addWidget(title)
+        title = QLabel("Thông Tin Tài Khoản & Máy")
+        title.setStyleSheet("color: #ffffff; font-size: 10px; font-weight: 800; font-family: 'Segoe UI', Arial; border: none; border-bottom: 1px solid #1f242d; padding-bottom: 3px;")
+        card_layout.addWidget(title)
 
         self.lbl_key = QLabel("LICENSE KEY: Đang tải...")
-        self.lbl_key.setStyleSheet("color: #60a5fa; font-size: 9.5px; font-weight: 700; font-family: 'Consolas', monospace;")
-        box_layout.addWidget(self.lbl_key)
+        self.lbl_key.setStyleSheet("color: #60a5fa; font-size: 9.5px; font-weight: 700; font-family: 'Consolas', monospace; border: none;")
+        card_layout.addWidget(self.lbl_key)
 
         self.lbl_hwid = QLabel(f"HWID: {CURRENT_HWID}")
-        self.lbl_hwid.setStyleSheet("color: #a1a1aa; font-size: 9px; font-family: 'Consolas', monospace;")
-        box_layout.addWidget(self.lbl_hwid)
+        self.lbl_hwid.setStyleSheet("color: #9ca3af; font-size: 9px; font-family: 'Consolas', monospace; border: none;")
+        card_layout.addWidget(self.lbl_hwid)
 
         self.lbl_ip = QLabel("IP: Đang tải...")
-        self.lbl_ip.setStyleSheet("color: #a1a1aa; font-size: 9px; font-family: 'Consolas', monospace;")
-        box_layout.addWidget(self.lbl_ip)
+        self.lbl_ip.setStyleSheet("color: #9ca3af; font-size: 9px; font-family: 'Consolas', monospace; border: none;")
+        card_layout.addWidget(self.lbl_ip)
 
         self.lbl_expiry = QLabel("Hạn Dùng: Đang tải...")
-        self.lbl_expiry.setStyleSheet("color: #00ff66; font-size: 9px; font-weight: bold; font-family: 'Segoe UI', Arial;")
-        box_layout.addWidget(self.lbl_expiry)
+        self.lbl_expiry.setStyleSheet("color: #22c55e; font-size: 9px; font-weight: 700; font-family: 'Segoe UI', Arial; border: none;")
+        card_layout.addWidget(self.lbl_expiry)
 
-        line = QFrame()
-        line.setFrameShape(QFrame.Shape.HLine)
-        line.setStyleSheet("color: #1f242d; margin: 2px 0;")
-        box_layout.addWidget(line)
+        sep = QLabel("")
+        sep.setFixedHeight(1)
+        sep.setStyleSheet("background-color: #1f242d; border: none;")
+        card_layout.addWidget(sep)
 
         self.lbl_version = QLabel(f"Phiên bản: {APP_VERSION}")
-        self.lbl_version.setStyleSheet("color: #9ca3af; font-size: 9px; font-family: 'Segoe UI', Arial;")
-        box_layout.addWidget(self.lbl_version)
+        self.lbl_version.setStyleSheet("color: #a1a1aa; font-size: 8.8px; font-family: 'Segoe UI', Arial; border: none;")
+        card_layout.addWidget(self.lbl_version)
 
         self.lbl_updated_date = QLabel(f"Ngày cập nhật: {BUILD_DATE}")
-        self.lbl_updated_date.setStyleSheet("color: #9ca3af; font-size: 9px; font-family: 'Segoe UI', Arial;")
-        box_layout.addWidget(self.lbl_updated_date)
+        self.lbl_updated_date.setStyleSheet("color: #a1a1aa; font-size: 8.8px; font-family: 'Segoe UI', Arial; border: none;")
+        card_layout.addWidget(self.lbl_updated_date)
 
         self.lbl_updated_time = QLabel(f"Giờ cập nhật: {BUILD_TIME}")
-        self.lbl_updated_time.setStyleSheet("color: #9ca3af; font-size: 9px; font-family: 'Segoe UI', Arial;")
-        box_layout.addWidget(self.lbl_updated_time)
+        self.lbl_updated_time.setStyleSheet("color: #a1a1aa; font-size: 8.8px; font-family: 'Segoe UI', Arial; border: none;")
+        card_layout.addWidget(self.lbl_updated_time)
 
-        self.lbl_user = QLabel(f"Username máy: <span style='color:#00ff66; font-weight:bold;'>✔ {LOCAL_USERNAME}</span>")
-        self.lbl_user.setStyleSheet("color: #d1d5db; font-size: 9px; font-family: 'Segoe UI', Arial; margin-top: 2px;")
-        box_layout.addWidget(self.lbl_user)
+        self.lbl_user = QLabel(f"Tên của bạn: <span style='color:#22c55e; font-weight:bold;'>✔ {app_config.custom_nickname}</span>")
+        self.lbl_user.setStyleSheet("color: #d1d5db; font-size: 9px; font-family: 'Segoe UI', Arial; border: none; margin-top: 2px;")
+        card_layout.addWidget(self.lbl_user)
 
-        layout.addWidget(box)
+        layout.addWidget(self.card)
 
     def update_info(self):
         curr_key = net_state.active_key or load_saved_key() or "KEY"
@@ -1750,7 +1758,9 @@ class InfoTabPage(QWidget):
         self.lbl_key.setText(f"LICENSE KEY: {curr_key} {role_badge}")
         self.lbl_ip.setText(f"IP: {net_state.cached_ip}")
         self.lbl_expiry.setText(f"Thời hạn còn lại: {time_str}")
+        self.lbl_user.setText(f"Tên của bạn: <span style='color:#22c55e; font-weight:bold;'>✔ {app_config.custom_nickname}</span>")
 
+# TAB 3: FEEDBACK & CHAT (LƯU CHAT TRỰC TIẾP TRÊN VPS + TÙY CHỈNH TÊN)
 class FeedbackChatTabPage(QWidget):
     def __init__(self, parent_widget, parent=None):
         super().__init__(parent)
@@ -1758,8 +1768,9 @@ class FeedbackChatTabPage(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 2, 4, 4)
-        layout.setSpacing(4)
+        layout.setSpacing(3)
 
+        # Header chuyển qua lại Feedback và Chat
         sub_tab_layout = QHBoxLayout()
         sub_tab_layout.setSpacing(4)
 
@@ -1777,43 +1788,58 @@ class FeedbackChatTabPage(QWidget):
         sub_tab_layout.addWidget(self.btn_tab_chat)
         layout.addLayout(sub_tab_layout)
 
+        # Khung cài đặt tên tự chọn (Đặt tên gì cũng được)
+        name_row = QHBoxLayout()
+        name_row.setSpacing(4)
+        lbl_n = QLabel("Tên hiển thị:")
+        lbl_n.setStyleSheet("color:#9ca3af; font-size:8.8px; font-weight:bold;")
+        self.name_input = QLineEdit()
+        self.name_input.setText(app_config.custom_nickname)
+        self.name_input.setPlaceholderText("Nhập tên bạn muốn đặt...")
+        self.name_input.setFixedHeight(22)
+        self.name_input.setStyleSheet("background-color:#12141a; border:1px solid #1c202a; border-radius:4px; color:#38bdf8; font-size:9.5px; font-weight:bold; padding:0 5px;")
+        self.name_input.textChanged.connect(self.on_name_changed)
+
+        name_row.addWidget(lbl_n)
+        name_row.addWidget(self.name_input)
+        layout.addLayout(name_row)
+
         self.sub_stack = QStackedWidget()
         
         # VIEW 1: FEEDBACK
         fb_view = QWidget()
         fb_layout = QVBoxLayout(fb_view)
         fb_layout.setContentsMargins(0, 2, 0, 0)
-        fb_layout.setSpacing(4)
+        fb_layout.setSpacing(3)
 
         tip_lbl = QLabel("💡 Panel tự động chụp màn hình game gửi lên Discord.")
         tip_lbl.setWordWrap(True)
-        tip_lbl.setStyleSheet("color: #facc15; font-size: 8.5px; font-family: 'Segoe UI', Arial; background: rgba(234, 179, 8, 0.1); padding: 4px; border-radius: 4px;")
+        tip_lbl.setStyleSheet("color: #facc15; font-size: 8.5px; font-family: 'Segoe UI', Arial; background: rgba(234, 179, 8, 0.1); padding: 3px; border-radius: 4px;")
         fb_layout.addWidget(tip_lbl)
 
         self.fb_input = QLineEdit()
         self.fb_input.setPlaceholderText("Ghi chú phản hồi / báo lỗi...")
-        self.fb_input.setFixedHeight(28)
+        self.fb_input.setFixedHeight(26)
         self.fb_input.setStyleSheet("background-color: #12141a; border: 1px solid #1c202a; border-radius: 5px; color: #fff; font-size: 9.5px; padding: 0 6px;")
         fb_layout.addWidget(self.fb_input)
 
         self.send_fb_btn = QPushButton("📷 GỬI FEEDBACK")
-        self.send_fb_btn.setFixedHeight(28)
+        self.send_fb_btn.setFixedHeight(26)
         self.send_fb_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.send_fb_btn.setStyleSheet("background-color: #0284c7; color: #ffffff; border: none; border-radius: 5px; font-size: 10px; font-weight: 800;")
         self.send_fb_btn.clicked.connect(self.handle_send_feedback)
         fb_layout.addWidget(self.send_fb_btn)
 
-        # VIEW 2: CHAT
+        # VIEW 2: CHAT TRỰC TIẾP VPS
         chat_view = QWidget()
         chat_layout = QVBoxLayout(chat_view)
         chat_layout.setContentsMargins(0, 2, 0, 0)
-        chat_layout.setSpacing(4)
+        chat_layout.setSpacing(3)
 
         self.chat_box = QTextEdit()
         self.chat_box.setReadOnly(True)
         self.chat_box.setFixedHeight(85)
         self.chat_box.setStyleSheet("background-color: #11141a; border: 1px solid #1c202a; border-radius: 5px; color: #d1d5db; font-size: 9px; font-family: 'Consolas', monospace; padding: 3px;")
-        self.chat_box.append("<span style='color:#6b7280;'>[Hệ Thống] Phòng chat trực tuyến</span>")
         chat_layout.addWidget(self.chat_box)
 
         send_row = QHBoxLayout()
@@ -1821,12 +1847,12 @@ class FeedbackChatTabPage(QWidget):
 
         self.chat_input = QLineEdit()
         self.chat_input.setPlaceholderText("Nhập tin nhắn...")
-        self.chat_input.setFixedHeight(26)
+        self.chat_input.setFixedHeight(24)
         self.chat_input.setStyleSheet("background-color: #12141a; border: 1px solid #1c202a; border-radius: 5px; color: #fff; font-size: 9.5px; padding: 0 6px;")
         self.chat_input.returnPressed.connect(self.handle_send_chat)
 
         self.send_chat_btn = QPushButton("Gửi")
-        self.send_chat_btn.setFixedSize(45, 26)
+        self.send_chat_btn.setFixedSize(45, 24)
         self.send_chat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.send_chat_btn.setStyleSheet("background-color: #0284c7; color: #ffffff; border: none; border-radius: 5px; font-size: 9.5px; font-weight: 800;")
         self.send_chat_btn.clicked.connect(self.handle_send_chat)
@@ -1841,12 +1867,24 @@ class FeedbackChatTabPage(QWidget):
 
         self.switch_sub_tab(0)
 
+        # Timer đồng bộ chat VPS mỗi 3 giây
+        self.chat_timer = QTimer(self)
+        self.chat_timer.timeout.connect(self.fetch_vps_chat)
+        self.chat_timer.start(3000)
+
+    def on_name_changed(self, text):
+        val = text.strip() or DEFAULT_USERNAME
+        app_config.custom_nickname = val
+        save_config()
+
     def switch_sub_tab(self, idx):
         self.sub_stack.setCurrentIndex(idx)
         style_active = "background-color: #0284c7; color: #fff; border: 1px solid #38bdf8; border-radius: 4px; font-size: 9px; font-weight: bold;"
         style_inactive = "background-color: #0e1117; color: #9ca3af; border: 1px solid #27272a; border-radius: 4px; font-size: 9px;"
         self.btn_tab_fb.setStyleSheet(style_active if idx == 0 else style_inactive)
         self.btn_tab_chat.setStyleSheet(style_active if idx == 1 else style_inactive)
+        if idx == 1:
+            self.fetch_vps_chat()
 
     def get_role_tag(self):
         exp_at = net_state.key_expires_at
@@ -1854,64 +1892,131 @@ class FeedbackChatTabPage(QWidget):
             return "VIP"
         return "FREE"
 
+    def fetch_vps_chat(self):
+        def _fetch():
+            try:
+                r = requests.get(VPS_CHAT_URL, timeout=3)
+                if r.status_code == 200:
+                    messages = r.json().get("messages", [])
+                    QTimer.singleShot(0, lambda: self._render_messages(messages))
+            except Exception:
+                pass
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _render_messages(self, messages):
+        html_lines = []
+        for m in messages:
+            t = m.get("time", "00:00")
+            role = m.get("role", "FREE")
+            user = m.get("user", "User")
+            txt = m.get("text", "")
+            col = "#f59e0b" if role == "VIP" else "#60a5fa"
+            html_lines.append(f"<span style='color:#6b7280;'>[{t}]</span> <span style='color:{col}; font-weight:bold;'>[{role}]</span> <b>{user}:</b> {txt}")
+        
+        self.chat_box.setHtml("<br>".join(html_lines))
+        self.chat_box.verticalScrollBar().setValue(self.chat_box.verticalScrollBar().maximum())
+
     def handle_send_feedback(self):
         msg = self.fb_input.text().strip() or "Không có ghi chú"
         self.send_fb_btn.setText("ĐANG GỬI...")
         self.send_fb_btn.setEnabled(False)
-        QApplication.processEvents()
 
-        def _send():
-            try:
-                screen = QGuiApplication.primaryScreen()
+        # Chụp ảnh trên luồng chính trước khi gọi thread gửi
+        img_data = None
+        try:
+            screen = QGuiApplication.primaryScreen()
+            if screen:
                 pixmap = screen.grabWindow(0)
                 byte_array = QBuffer()
                 byte_array.open(QIODevice.OpenModeFlag.WriteOnly)
                 pixmap.save(byte_array, "PNG")
-                img_data = byte_array.data().data()
+                img_data = bytes(byte_array.data())
+        except Exception as e:
+            debug_log(f"Screen capture error: {e}")
 
-                role = self.get_role_tag()
+        role = self.get_role_tag()
+        user_name = app_config.custom_nickname
+
+        def _send():
+            try:
                 payload = {
-                    "content": f"📢 **FEEDBACK TỪ [{role}] {LOCAL_USERNAME}**\n📝 **Nội dung:** {msg}\n💻 **HWID:** `{CURRENT_HWID}`\n🌐 **IP:** `{net_state.cached_ip}`"
+                    "content": f"📢 **FEEDBACK TỪ [{role}] {user_name}**\n📝 **Nội dung:** {msg}\n💻 **HWID:** `{CURRENT_HWID}`\n🌐 **IP:** `{net_state.cached_ip}`"
                 }
-                files = {
-                    "file": ("screenshot.png", img_data, "image/png")
-                }
-                requests.post(DISCORD_WEBHOOK_URL, data=payload, files=files, timeout=8)
+                if img_data:
+                    files = {"file": ("screenshot.png", img_data, "image/png")}
+                    requests.post(DISCORD_WEBHOOK_URL, data=payload, files=files, timeout=8)
+                else:
+                    requests.post(DISCORD_WEBHOOK_URL, data=payload, timeout=8)
             except Exception as e:
                 debug_log(f"Feedback error: {e}")
             finally:
-                QTimer.singleShot(0, lambda: self._on_fb_sent())
+                QTimer.singleShot(0, self._on_fb_sent)
 
         threading.Thread(target=_send, daemon=True).start()
 
     def _on_fb_sent(self):
-        self.send_fb_btn.setText("✔ ĐÃ GỬI XONG")
+        self.send_fb_btn.setText("✔ ĐÃ GỬI THÀNH CÔNG")
         self.fb_input.setText("")
-        QTimer.singleShot(2000, lambda: [self.send_fb_btn.setText("📷 GỬI FEEDBACK"), self.send_fb_btn.setEnabled(True)])
+        QTimer.singleShot(2000, self._reset_fb_button)
+
+    def _reset_fb_button(self):
+        self.send_fb_btn.setText("📷 GỬI FEEDBACK")
+        self.send_fb_btn.setEnabled(True)
 
     def handle_send_chat(self):
         text = self.chat_input.text().strip()
         if not text: return
 
         role = self.get_role_tag()
-        curr_time_str = datetime.now().strftime("%H:%M")
-        color = "#f59e0b" if role == "VIP" else "#60a5fa"
-
-        chat_line = f"<span style='color:#6b7280;'>[{curr_time_str}]</span> <span style='color:{color}; font-weight:bold;'>[{role}]</span> <b>{LOCAL_USERNAME}:</b> {text}"
-        self.chat_box.append(chat_line)
+        user_name = app_config.custom_nickname
         self.chat_input.setText("")
 
-        def _send_chat():
+        def _send_vps():
             try:
+                requests.post(VPS_CHAT_URL, json={
+                    "role": role,
+                    "user": user_name,
+                    "text": text
+                }, timeout=4)
                 requests.post(DISCORD_WEBHOOK_URL, json={
-                    "content": f"💬 **[{role}] {LOCAL_USERNAME}**: {text}"
-                }, timeout=5)
+                    "content": f"💬 **[{role}] {user_name}**: {text}"
+                }, timeout=4)
             except Exception:
                 pass
+            finally:
+                self.fetch_vps_chat()
 
-        threading.Thread(target=_send_chat, daemon=True).start()
+        threading.Thread(target=_send_vps, daemon=True).start()
 
-# ================= CONTAINER KEYBINDS & CÁC TAB CO GIÃN TỰ ĐỘNG =================
+# TAB 4: COMING SOON (CHO 3 Ô BẢO TRÌ)
+class ComingSoonTabPage(QWidget):
+    def __init__(self, parent_widget, parent=None):
+        super().__init__(parent)
+        self.parent_widget = parent_widget
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        box = QWidget()
+        box.setStyleSheet("background-color: #0e1117; border: 1px solid #1c202a; border-radius: 8px; padding: 15px;")
+        box_layout = QVBoxLayout(box)
+        box_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        box_layout.setSpacing(6)
+
+        lbl_cs = QLabel("COMING SOON")
+        lbl_cs.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_cs.setStyleSheet("color: #38bdf8; font-size: 16px; font-weight: 900; font-family: 'Consolas', sans-serif; letter-spacing: 2px; border: none;")
+        box_layout.addWidget(lbl_cs)
+
+        lbl_sub = QLabel("Tính năng này đang trong quá trình phát triển & bảo trì.")
+        lbl_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_sub.setStyleSheet("color: #6b7280; font-size: 9px; font-family: 'Segoe UI', Arial; border: none;")
+        box_layout.addWidget(lbl_sub)
+
+        layout.addWidget(box)
+
+# ================= CONTAINER KEYBINDS & CÁC TAB =================
 class KeybindsWidget(QWidget):
     def __init__(self, on_close_callback, parent=None):
         super().__init__(parent)
@@ -1923,30 +2028,24 @@ class KeybindsWidget(QWidget):
         self.top_bar = TopBar("ZeroX", on_close=on_close_callback)
         layout.addWidget(self.top_bar)
 
-        self.maint_banner = QLabel("")
-        self.maint_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.maint_banner.setFixedHeight(18)
-        self.maint_banner.setStyleSheet("color: #ef4444; font-size: 9px; font-weight: bold; background: rgba(239, 68, 68, 0.12); border-radius: 3px;")
-        self.maint_banner.hide()
-        layout.addWidget(self.maint_banner)
-
         self.tab_stack = SlidingStackedWidget(self)
         self.main_page = MainTabPage(self)
         self.setting_page = SettingTabPage(self)
         self.info_page = InfoTabPage(self)
         self.feedback_page = FeedbackChatTabPage(self)
+        self.coming_soon_page = ComingSoonTabPage(self)
 
-        self.tab_stack.addWidget(self.main_page)     # 0: Fake Lag
-        self.tab_stack.addWidget(self.setting_page)  # 1: Setting
-        self.tab_stack.addWidget(self.info_page)     # 2: Info
-        self.tab_stack.addWidget(self.feedback_page) # 3: Feedback & Chat
+        self.tab_stack.addWidget(self.main_page)         # 0: Fake Lag
+        self.tab_stack.addWidget(self.setting_page)      # 1: Setting
+        self.tab_stack.addWidget(self.info_page)         # 2: Info
+        self.tab_stack.addWidget(self.feedback_page)     # 3: Feedback & Chat
+        self.tab_stack.addWidget(self.coming_soon_page)  # 4: Coming Soon (Bảo trì)
         layout.addWidget(self.tab_stack)
 
         self.countdown_timer = QTimer(self)
         self.countdown_timer.timeout.connect(self.update_key_expiry_display)
 
         signals.open_tab_requested.connect(self.switch_tab_direct)
-        signals.show_maint_toast.connect(self.show_maintenance_warning)
 
     def switch_tab_direct(self, index: int):
         if index == 2:
@@ -1956,7 +2055,7 @@ class KeybindsWidget(QWidget):
 
     def adjust_panel_size(self):
         curr_idx = self.tab_stack.currentIndex()
-        h_map = {0: 175, 1: 175, 2: 215, 3: 195}
+        h_map = {0: 175, 1: 175, 2: 220, 3: 205, 4: 160}
         target_h = h_map.get(curr_idx, 180)
         
         if self.parentWidget() and hasattr(self.parentWidget(), 'resize'):
@@ -1964,12 +2063,6 @@ class KeybindsWidget(QWidget):
             if p and hasattr(p, 'bg_frame'):
                 p.resize(300, target_h + 30)
                 p.bg_frame.setGeometry(0, 0, 300, target_h + 30)
-
-    def show_maintenance_warning(self, feature_name):
-        audio.beep(320, 100)
-        self.maint_banner.setText(f"🔒 Tính năng [{feature_name}] đang được BẢO TRÌ!")
-        self.maint_banner.show()
-        QTimer.singleShot(2500, self.maint_banner.hide)
 
     def start_timer(self):
         self.countdown_timer.start(1000)
@@ -2323,6 +2416,7 @@ if __name__ == '__main__':
     main_win = MainContainerWindow()
     main_win.show()
 
+    # Menu Tổ Ong ở góc trên bên trái màn hình game
     honeycomb_overlay = TopLeftHoneycombOverlay()
     signals.open_tab_requested.connect(honeycomb_overlay.update_active_node)
 
