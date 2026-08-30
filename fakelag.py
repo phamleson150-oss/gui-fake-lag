@@ -1874,10 +1874,15 @@ class FeedbackChatTabPage(QWidget):
                 r = requests.get(VPS_CHAT_URL, timeout=3)
                 if r.status_code == 200:
                     data = r.json()
-                    messages = data.get("messages", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+                    # Hỗ trợ cả định dạng trả về là list trực tiếp hoặc dict chứa khóa "messages"
+                    messages = []
+                    if isinstance(data, dict):
+                        messages = data.get("messages", [])
+                    elif isinstance(data, list):
+                        messages = data
                     QTimer.singleShot(0, lambda: self._render_messages(messages))
-            except Exception:
-                pass
+            except Exception as e:
+                debug_log(f"Fetch chat error: {e}")
         threading.Thread(target=_fetch, daemon=True).start()
 
     def _render_messages(self, messages):
@@ -1915,6 +1920,7 @@ class FeedbackChatTabPage(QWidget):
 
         def _send():
             try:
+                # Đã loại bỏ hoàn toàn hiển thị License Key theo yêu cầu ảnh mẫu số 2
                 payload = {
                     "content": f"📷 **BÁO CÁO FEEDBACK / LỖI TỪ PANEL PC**\n\n**Feedback từ User:** {user_name}\n👤 **Username:** {user_name}\n📝 **Ghi chú:** {msg}\n💻 **HWID:** `{CURRENT_HWID}`\n🌐 **IP:** `{net_state.cached_ip}`"
                 }
