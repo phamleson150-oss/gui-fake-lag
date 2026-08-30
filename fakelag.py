@@ -68,9 +68,9 @@ LICENSE_FILE = "zerox_license.json"
 DISCORD_FEEDBACK_WEBHOOK = "https://discord.com/api/webhooks/1543470614025863308/SD9lOHs2pxJZFrdFFuYQMBOkKAF_6xgY8xetSagvXEU8fUc4O5e_jriDdIIbO1vylQrL"
 DISCORD_CHAT_WEBHOOK = "https://discord.com/api/webhooks/1543478594439880857/fNw9bdIjZP5-1dRfflPKlVLVPRJN4Qz67DZ-E31Y4ArDQGlVOS_M3XTDREOv7_VueEwn"
 
-APP_VERSION = "1.0.7"
-BUILD_DATE = "30/08/2026"
-BUILD_TIME = "1:00:10"
+APP_VERSION = "1.0.8"
+BUILD_DATE = datetime.now().strftime("%d/%m/%Y")
+BUILD_TIME = datetime.now().strftime("%H:%M:%S")
 
 def get_current_hwid():
     try:
@@ -598,6 +598,11 @@ def hotkey_loop():
                 cur_a = keyboard.is_pressed(app_config.aimlag_hotkey.key)
                 if cur_a and not ap: toggle_aimlag_arm()
                 ap = cur_a
+            else:
+                tp = keyboard.is_pressed(app_config.tele_hotkey.key)
+                fp = keyboard.is_pressed(app_config.freeze_hotkey.key)
+                gp = keyboard.is_pressed(app_config.ghost_hotkey.key)
+                ap = keyboard.is_pressed(app_config.aimlag_hotkey.key)
 
             cur_h = keyboard.is_pressed(app_config.hide_hotkey.key)
             if cur_h and not hp: signals.toggle_visibility.emit()
@@ -1854,7 +1859,7 @@ class FeedbackChatTabPage(QWidget):
 
         self.chat_timer = QTimer(self)
         self.chat_timer.timeout.connect(self.fetch_vps_chat)
-        self.chat_timer.start(3000)
+        self.chat_timer.start(2000)
 
     def lock_nickname(self):
         val = self.name_input.text().strip() or DEFAULT_USERNAME
@@ -1880,10 +1885,11 @@ class FeedbackChatTabPage(QWidget):
             try:
                 r = requests.get(VPS_CHAT_URL, timeout=3)
                 if r.status_code == 200:
-                    messages = r.json().get("messages", [])
+                    data = r.json()
+                    messages = data.get("messages", [])
                     QTimer.singleShot(0, lambda: self._render_messages(messages))
-            except Exception:
-                pass
+            except Exception as e:
+                debug_log(f"Fetch chat error: {e}")
         threading.Thread(target=_fetch, daemon=True).start()
 
     def _render_messages(self, messages):
@@ -1929,7 +1935,6 @@ class FeedbackChatTabPage(QWidget):
 
         def _send():
             try:
-                # Cập nhật format chỉ hiển thị Tên và Ghi chú (không hiện key, ip, hwid) theo yêu cầu
                 payload = {
                     "content": f"📢 **FEEDBACK TỪ [{role}] {user_name}**\n👤 **Username:** `{user_name}`\n📝 **Ghi chú:** {msg}"
                 }
@@ -1972,8 +1977,8 @@ class FeedbackChatTabPage(QWidget):
                 requests.post(DISCORD_CHAT_WEBHOOK, json={
                     "content": f"💬 **[{role}] {user_name}**: {text}"
                 }, timeout=4)
-            except Exception:
-                pass
+            except Exception as e:
+                debug_log(f"Send chat error: {e}")
             finally:
                 self.fetch_vps_chat()
 
@@ -2050,6 +2055,8 @@ class KeybindsWidget(QWidget):
         signals.open_tab_requested.connect(self.switch_tab_direct)
 
     def switch_tab_direct(self, index: int):
+        if net_state.current_tab == 0 and index != 0:
+            stop_all_features()
         net_state.current_tab = index
 
         if index == 2:
