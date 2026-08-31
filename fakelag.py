@@ -71,7 +71,7 @@ LICENSE_FILE = "zerox_license.json"
 DISCORD_FEEDBACK_WEBHOOK = "https://discord.com/api/webhooks/1543470614025863308/SD9lOHs2pxJZFrdFFuYQMBOkKAF_6xgY8xetSagvXEU8fUc4O5e_jriDdIIbO1vylQrL"
 DISCORD_CHAT_WEBHOOK = "https://discord.com/api/webhooks/1543478594439880857/fNw9bdIjZP5-1dRfflPKlVLVPRJN4Qz67DZ-E31Y4ArDQGlVOS_M3XTDREOv7_VueEwn"
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 _now_dt = datetime.fromtimestamp(os.path.getmtime(__file__) if os.path.exists(__file__) else time.time())
 BUILD_DATE = _now_dt.strftime("%d/%m/%Y")
 BUILD_TIME = _now_dt.strftime("%H:%M:%S")
@@ -828,9 +828,9 @@ class TopLeftHoneycombOverlay(QWidget):
             (center_x, center_y, 'network', "Fake Lag & Network", False, 0),
             (center_x - dx/2, center_y - dy, 'user', "Thông Tin Máy & Key", False, 2),
             (center_x + dx/2, center_y - dy, 'shield', "Bảo vệ Antiban (Bảo trì)", True, 4),
-            (center_x - dx, center_y, 'diamond', "Lag Địch 999+", False, 4),
+            (center_x - dx, center_y, 'diamond', "Chức năng VIP (Bảo trì)", True, 4),
             (center_x + dx, center_y, 'chat', "Feedback & Chat", False, 3),
-            (center_x - dx/2, center_y + dy, 'bars', "Thống Kê (Bảo trì)", True, 4),
+            (center_x - dx/2, center_y + dy, 'bars', "Lag Địch 999+", False, 4),  # Node icon bars gán vào tab Lag Địch
             (center_x + dx/2, center_y + dy, 'gear', "Cài Đặt", False, 1)
         ]
 
@@ -1088,7 +1088,7 @@ class InitialGuiWidget(QWidget):
         layout.setContentsMargins(14, 8, 14, 14)
         layout.setSpacing(10)
 
-        layout.addWidget(TopBar("GUI 1.1.0", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
+        layout.addWidget(TopBar("GUI 1.1.1", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
         layout.addSpacing(15)
 
         status_lbl = QLabel("Enable Inject Connect")
@@ -2141,48 +2141,26 @@ class FeedbackChatTabPage(QWidget):
         threading.Thread(target=_send_vps, daemon=True).start()
         threading.Thread(target=_send_discord, daemon=True).start()
 
-# TAB 4: LAG ĐỊCH (999+ PING) VỚI HOTKEY BINDING
+# TAB 4: LAG ĐỊCH (999+ PING) - GIAO DIỆN HÀNG NGANG GIỐNG HÌNH 2 / FAKE LAG
 class LagEnemyTabPage(QWidget):
     def __init__(self, parent_widget, parent=None):
         super().__init__(parent)
         self.parent_widget = parent_widget
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setContentsMargins(4, 2, 4, 4)
+        layout.setSpacing(4)
 
-        card = QFrame()
-        card.setStyleSheet("""
-            QFrame {
-                background-color: #11141b;
-                border: 1px solid #1f2633;
-                border-radius: 8px;
-            }
-            QLabel {
-                background: transparent;
-                border: none;
-            }
-        """)
-        c_layout = QVBoxLayout(card)
-        c_layout.setContentsMargins(15, 12, 15, 12)
-        c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        c_layout.setSpacing(6)
-
-        lbl_title = QLabel("🔥 LÀM LAG ĐỊCH (999+ PING)")
-        lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_title.setStyleSheet("color: #ef4444; font-size: 11.5px; font-weight: 900; font-family: 'Consolas', sans-serif; letter-spacing: 1px;")
-        c_layout.addWidget(lbl_title)
-
-        # Hàng chỉnh hotkey cho Lag Địch
         row = QHBoxLayout()
         row.setContentsMargins(4, 1, 4, 1)
-        lbl_hk = QLabel("HOTKEY LAG ĐỊCH")
-        lbl_hk.setStyleSheet("color: #f4f4f5; font-size: 10px; font-weight: 700; font-family: 'Segoe UI', Arial;")
-        row.addWidget(lbl_hk)
+
+        lbl = QLabel("LAG ĐỊCH")
+        lbl.setStyleSheet("color: #f4f4f5; font-size: 11px; font-weight: 700; font-family: 'Segoe UI', Arial; letter-spacing: 0.8px;")
+        row.addWidget(lbl)
         row.addStretch()
 
         self.btn_hotkey = QPushButton(app_config.lag_enemy_hotkey.key.upper())
-        self.btn_hotkey.setFixedSize(58, 22)
+        self.btn_hotkey.setFixedSize(58, 24)
         self.btn_hotkey.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_hotkey.setStyleSheet("""
             QPushButton {
@@ -2190,34 +2168,16 @@ class LagEnemyTabPage(QWidget):
                 color: #ffffff;
                 border: 1px solid #222733;
                 border-radius: 5px;
-                font-size: 10px;
+                font-size: 10.5px;
                 font-weight: 700;
+                font-family: 'Segoe UI', Arial;
             }
             QPushButton:hover { background-color: #1a1f2c; border-color: #3b4252; }
         """)
         self.btn_hotkey.clicked.connect(self.start_rebinding)
         row.addWidget(self.btn_hotkey)
-        c_layout.addLayout(row)
 
-        self.toggle_btn = QPushButton("BẬT LAG ĐỊCH")
-        self.toggle_btn.setFixedHeight(28)
-        self.toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.toggle_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #181c24;
-                color: #ef4444;
-                border: 1px solid #ef4444;
-                border-radius: 6px;
-                font-size: 10px;
-                font-weight: 800;
-                font-family: 'Consolas', sans-serif;
-            }
-            QPushButton:hover { background-color: #ef4444; color: #ffffff; }
-        """)
-        self.toggle_btn.clicked.connect(self.on_toggle_clicked)
-        c_layout.addWidget(self.toggle_btn)
-
-        layout.addWidget(card)
+        layout.addLayout(row)
 
     def start_rebinding(self):
         self.btn_hotkey.setText("...")
@@ -2228,37 +2188,6 @@ class LagEnemyTabPage(QWidget):
             keyboard.unhook(hook)
             save_config()
         hook = keyboard.on_release(on_key)
-
-    def on_toggle_clicked(self):
-        toggle_lag_enemy()
-        active = net_state.lag_enemy_mode
-        if active:
-            self.toggle_btn.setText("✔ ĐANG BẬT (LAG ĐỊCH 999+)")
-            self.toggle_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #00873a;
-                    color: #ffffff;
-                    border: 1px solid #00ff66;
-                    border-radius: 6px;
-                    font-size: 10px;
-                    font-weight: 800;
-                    font-family: 'Consolas', sans-serif;
-                }
-            """)
-        else:
-            self.toggle_btn.setText("BẬT LAG ĐỊCH")
-            self.toggle_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #181c24;
-                    color: #ef4444;
-                    border: 1px solid #ef4444;
-                    border-radius: 6px;
-                    font-size: 10px;
-                    font-weight: 800;
-                    font-family: 'Consolas', sans-serif;
-                }
-                QPushButton:hover { background-color: #ef4444; color: #ffffff; }
-            """)
 
 # ================= CONTAINER KEYBINDS & CÁC TAB =================
 class KeybindsWidget(QWidget):
@@ -2456,7 +2385,7 @@ class OverlayHUD(QWidget):
                                  ("Telekill", "TELEKILL ACTIVE", "#7000ff"),
                                  ("Ghost", "GHOST ACTIVE", "#00ff88"),
                                  ("AimLag", "AIMLAG ACTIVE", "#ffaa00"),
-                                 ("LagEnemy", "LAG ĐỊCH 999+", "#ef4444")]:
+                                 ("LagEnemy", "LAG ĐỊCH 999+", "#00ff66")]:
             lbl = QLabel(f" {text}")
             lbl.setFixedHeight(22)
             lbl.setStyleSheet(f"""
