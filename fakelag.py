@@ -65,6 +65,7 @@ VPS_BASE_URL = "http://103.78.3.222:53689"
 VPS_VERIFY_URL = f"{VPS_BASE_URL}/api/verify_key"
 VPS_CHAT_URL = f"{VPS_BASE_URL}/api/chat"
 VPS_ANNOUNCE_URL = f"{VPS_BASE_URL}/api/announcement"
+VPS_MAINT_URL = f"{VPS_BASE_URL}/api/maintenance"
 GET_KEY_URL = f"{VPS_BASE_URL}/"
 LICENSE_FILE = "zerox_license.json"
 
@@ -323,6 +324,7 @@ class AppSignals(QObject):
     key_expired = pyqtSignal()
     open_tab_requested = pyqtSignal(int)
     show_honeycomb = pyqtSignal()
+    trigger_maintenance = pyqtSignal(bool)
 
 signals = AppSignals()
 
@@ -1524,6 +1526,30 @@ class AdminNoticeWidget(QWidget):
 
         self.content_lbl.setText(f"<div style='line-height: 1.4;'>{formatted_html}</div>")
 
+# ================= MÀN HÌNH BẢO TRÌ (HIỆN KHI ADMIN BẬT BẢO TRÌ) =================
+class MaintenanceWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setSpacing(10)
+
+        self.icon_lbl = QLabel("🛑")
+        self.icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.icon_lbl.setStyleSheet("font-size: 32px; background: transparent; border: none;")
+        layout.addWidget(self.icon_lbl)
+
+        self.title_lbl = QLabel("HỆ THỐNG ĐANG BẢO TRÌ")
+        self.title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.title_lbl.setStyleSheet("color: #ef4444; font-size: 13px; font-weight: 900; font-family: 'Consolas', Arial;")
+        layout.addWidget(self.title_lbl)
+
+        self.sub_lbl = QLabel("Hệ thống đang tạm ngưng hoạt động để nâng cấp.\nVui lòng quay lại sau!")
+        self.sub_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.sub_lbl.setStyleSheet("color: #9ca3af; font-size: 10px; font-family: 'Segoe UI', Arial;")
+        layout.addWidget(self.sub_lbl)
+
 class KeyExpiredWidget(QWidget):
     def __init__(self, on_relogin_callback, on_close_callback, parent=None):
         super().__init__(parent)
@@ -2402,6 +2428,7 @@ class MainContainerWindow(QWidget):
         self.download_view = DownloadWidget(self.on_inject_clicked, cleanup_and_exit)
         self.init_view = InitializingWidget(self.on_init_finished)
         self.notice_view = AdminNoticeWidget(self.on_notice_understood, cleanup_and_exit)
+        self.maintenance_view = MaintenanceWidget()
         self.keybinds_view = KeybindsWidget(cleanup_and_exit)
         self.expired_view = KeyExpiredWidget(self.on_expired_relogin, cleanup_and_exit)
 
@@ -2411,20 +2438,50 @@ class MainContainerWindow(QWidget):
         self.stack.addWidget(self.download_view)       # 3
         self.stack.addWidget(self.init_view)           # 4
         self.stack.addWidget(self.notice_view)         # 5
-        self.stack.addWidget(self.keybinds_view)       # 6
-        self.stack.addWidget(self.expired_view)        # 7
+        self.stack.addWidget(self.maintenance_view)    # 6
+        self.stack.addWidget(self.keybinds_view)       # 7
+        self.stack.addWidget(self.expired_view)        # 8
 
         self.stack.setCurrentIndex(0)
 
         self.sync_key_timer = QTimer(self)
         self.sync_key_timer.timeout.connect(self.sync_key_with_server)
 
+        # Bộ đếm thời gian kiểm tra bảo trì từ VPS mỗi 3 giây
+        self.maint_timer = QTimer(self)
+        self.maint_timer.timeout.connect(self.check_maintenance_status)
+        self.maint_timer.start(3000)
+
         signals.toggle_visibility.connect(self.toggle_visibility)
         signals.key_expired.connect(self.handle_key_expired)
         signals.open_tab_requested.connect(self.bring_to_front)
+        signals.trigger_maintenance.connect(self.handle_maintenance_mode)
 
         self._drag = False
         self._pos = None
+
+    def check_maintenance_status(self):
+        def _poll():
+            try:
+                r = requests.get(VPS_MAINT_URL, timeout=2)
+                if r.status_code == 200:
+                    maint = r.json().get("maintenance", False)
+                    signals.trigger_maintenance.emit(maint)
+            except Exception:
+                pass
+        threading.Thread(target=_poll, daemon=True).start()
+
+    def handle_maintenance_mode(self, is_maint):
+        if is_maint:
+            if self.stack.currentIndex() != 6:
+                self.resize(300, 180)
+                self.bg_frame.setGeometry(0, 0, 300, 180)
+                self.stack.setCurrentIndex(6)
+        else:
+            if self.stack.currentIndex() == 6:
+                self.resize(300, 175)
+                self.bg_frame.setGeometry(0, 0, 300, 175)
+                self.stack.setCurrentIndex(7)
 
     def bring_to_front(self, _):
         if not self.isVisible():
@@ -2492,7 +2549,7 @@ class MainContainerWindow(QWidget):
         self.keybinds_view.start_timer()
         self.resize(300, 175)
         self.bg_frame.setGeometry(0, 0, 300, 175)
-        self.stack.setCurrentIndex(6)
+        self.stack.setCurrentIndex(7)
         self.keybinds_view.adjust_panel_size()
         signals.show_honeycomb.emit()
 
@@ -2509,7 +2566,7 @@ class MainContainerWindow(QWidget):
         self.activateWindow()
         self.resize(300, 185)
         self.bg_frame.setGeometry(0, 0, 300, 185)
-        self.stack.setCurrentIndex(7)
+        self.stack.setCurrentIndex(8)
 
     def on_expired_relogin(self):
         self.login_view.status_msg.setText("")
