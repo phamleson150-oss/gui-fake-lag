@@ -71,7 +71,7 @@ LICENSE_FILE = "zerox_license.json"
 DISCORD_FEEDBACK_WEBHOOK = "https://discord.com/api/webhooks/1543470614025863308/SD9lOHs2pxJZFrdFFuYQMBOkKAF_6xgY8xetSagvXEU8fUc4O5e_jriDdIIbO1vylQrL"
 DISCORD_CHAT_WEBHOOK = "https://discord.com/api/webhooks/1543478594439880857/fNw9bdIjZP5-1dRfflPKlVLVPRJN4Qz67DZ-E31Y4ArDQGlVOS_M3XTDREOv7_VueEwn"
 
-APP_VERSION = "1.0.9"
+APP_VERSION = "1.1.0"
 _now_dt = datetime.fromtimestamp(os.path.getmtime(__file__) if os.path.exists(__file__) else time.time())
 BUILD_DATE = _now_dt.strftime("%d/%m/%Y")
 BUILD_TIME = _now_dt.strftime("%H:%M:%S")
@@ -241,6 +241,7 @@ class AppConfig:
         self.freeze_hotkey = HotkeyConfig(key='e')
         self.ghost_hotkey = HotkeyConfig(key='v')
         self.aimlag_hotkey = HotkeyConfig(key='c')
+        self.lag_enemy_hotkey = HotkeyConfig(key='x')
         self.hide_hotkey = HotkeyConfig(key='f7')
         self.stream_hotkey = HotkeyConfig(key='f8')
         
@@ -248,6 +249,7 @@ class AppConfig:
         self.beep_freeze = True
         self.beep_ghost = True
         self.beep_aimlag = True
+        self.beep_lag_enemy = True
         
         self.stream_mode = False
         self.fix_dame_enabled = True
@@ -266,6 +268,7 @@ def load_config():
                 app_config.freeze_hotkey.key = data.get('freeze_hotkey', 'e')
                 app_config.ghost_hotkey.key = data.get('ghost_hotkey', 'v')
                 app_config.aimlag_hotkey.key = data.get('aimlag_hotkey', 'c')
+                app_config.lag_enemy_hotkey.key = data.get('lag_enemy_hotkey', 'x')
                 app_config.hide_hotkey.key = data.get('hide_hotkey', 'f7')
                 app_config.stream_hotkey.key = data.get('stream_hotkey', 'f8')
                 
@@ -273,6 +276,7 @@ def load_config():
                 app_config.beep_freeze = data.get('beep_freeze', True)
                 app_config.beep_ghost = data.get('beep_ghost', True)
                 app_config.beep_aimlag = data.get('beep_aimlag', True)
+                app_config.beep_lag_enemy = data.get('beep_lag_enemy', True)
                 
                 app_config.stream_mode = data.get('stream_mode', False)
                 app_config.fix_dame_enabled = data.get('fix_dame_enabled', True)
@@ -288,12 +292,14 @@ def save_config():
             'freeze_hotkey': app_config.freeze_hotkey.key,
             'ghost_hotkey': app_config.ghost_hotkey.key,
             'aimlag_hotkey': app_config.aimlag_hotkey.key,
+            'lag_enemy_hotkey': app_config.lag_enemy_hotkey.key,
             'hide_hotkey': app_config.hide_hotkey.key,
             'stream_hotkey': app_config.stream_hotkey.key,
             'beep_tele': app_config.beep_tele,
             'beep_freeze': app_config.beep_freeze,
             'beep_ghost': app_config.beep_ghost,
             'beep_aimlag': app_config.beep_aimlag,
+            'beep_lag_enemy': app_config.beep_lag_enemy,
             'stream_mode': app_config.stream_mode,
             'fix_dame_enabled': app_config.fix_dame_enabled,
             'custom_nickname': app_config.custom_nickname,
@@ -324,6 +330,9 @@ class AudioManager:
 
     def play_aimlag(self, active):
         if app_config.beep_aimlag: self.beep(850 if active else 380, 75)
+
+    def play_lag_enemy(self, active):
+        if app_config.beep_lag_enemy: self.beep(880 if active else 400, 75)
 
 audio = AudioManager()
 
@@ -368,7 +377,7 @@ def fetch_ip_background():
     except Exception:
         net_state.cached_ip = "127.0.0.1"
 
-# ================= BỘ ĐIỀU PHỐI MẠNG (ĐÃ TỐI ƯU CHỐNG GIẬT VỀ) =================
+# ================= BỘ ĐIỀU PHỐI MẠNG =================
 class DivertSession:
     def __init__(self, filter_str, max_packets=MAX_PACKETS, smooth_release=True):
         self.filter_str = filter_str
@@ -551,7 +560,7 @@ def toggle_aimlag_arm():
     signals.notify.emit('AimLag', active)
 
 def toggle_lag_enemy():
-    if not net_state.is_injected: return
+    if not net_state.is_injected or net_state.current_tab != 4: return
     with net_state.lock:
         if net_state.lag_enemy_mode:
             net_state.lag_enemy_mode = False
@@ -561,7 +570,7 @@ def toggle_lag_enemy():
             net_state.lag_enemy_mode = True
             lag_enemy_session.start()
             active = True
-    audio.beep(880 if active else 400, 75)
+    audio.play_lag_enemy(active)
     signals.notify.emit('LagEnemy', active)
 
 def on_mouse_click(x, y, button, pressed):
@@ -604,7 +613,7 @@ def stop_all_features():
     signals.notify.emit('LagEnemy', False)
 
 def hotkey_loop():
-    tp = gp = fp = ap = hp = sp = False
+    tp = gp = fp = ap = lp = hp = sp = False
     while net_state.running:
         try:
             if not net_state.is_authenticated or not net_state.is_injected:
@@ -636,11 +645,16 @@ def hotkey_loop():
                 cur_a = keyboard.is_pressed(app_config.aimlag_hotkey.key)
                 if cur_a and not ap: toggle_aimlag_arm()
                 ap = cur_a
+            elif net_state.current_tab == 4:
+                cur_l = keyboard.is_pressed(app_config.lag_enemy_hotkey.key)
+                if cur_l and not lp: toggle_lag_enemy()
+                lp = cur_l
             else:
                 tp = keyboard.is_pressed(app_config.tele_hotkey.key)
                 fp = keyboard.is_pressed(app_config.freeze_hotkey.key)
                 gp = keyboard.is_pressed(app_config.ghost_hotkey.key)
                 ap = keyboard.is_pressed(app_config.aimlag_hotkey.key)
+                lp = keyboard.is_pressed(app_config.lag_enemy_hotkey.key)
 
             cur_h = keyboard.is_pressed(app_config.hide_hotkey.key)
             if cur_h and not hp: signals.toggle_visibility.emit()
@@ -661,12 +675,13 @@ def hotkey_loop():
 class VectorHexagonButton(QWidget):
     clicked = pyqtSignal()
 
-    def __init__(self, icon_type, tooltip_text, is_maintenance=False, is_active=False, radius=22, parent=None):
+    def __init__(self, icon_type, tooltip_text, is_maintenance=False, is_active=False, is_feature_active=False, radius=22, parent=None):
         super().__init__(parent)
         self.icon_type = icon_type
         self.tooltip_text = tooltip_text
         self.is_maintenance = is_maintenance
         self.is_active = is_active
+        self.is_feature_active = is_feature_active
         self.radius = radius
         self.setFixedSize(int(radius * 2), int(radius * 2))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -698,7 +713,11 @@ class VectorHexagonButton(QWidget):
             rad = math.radians(deg)
             poly.append(QPointF(cx + r * math.cos(rad), cy + r * math.sin(rad)))
 
-        if self.is_maintenance:
+        if self.is_feature_active:
+            bg_color = QColor(16, 40, 24, 240)
+            border_color = QColor("#00ff66")
+            icon_color = QColor("#00ff66")
+        elif self.is_maintenance:
             bg_color = QColor(16, 18, 24, 210) if not self._hover else QColor(24, 28, 38, 240)
             border_color = QColor("#ef4444") if self._hover else QColor(45, 52, 68, 180)
             icon_color = QColor("#94a3b8") if not self._hover else QColor("#ef4444")
@@ -709,7 +728,7 @@ class VectorHexagonButton(QWidget):
         else:
             bg_color = QColor(16, 18, 24, 210) if not self._hover else QColor(30, 36, 50, 240)
             border_color = QColor("#818cf8") if self._hover else QColor(45, 52, 68, 180)
-            icon_color = QColor("#f1f5f9") if not self._hover else QColor("#94a3b8")
+            icon_color = QColor("#f1f5f9") if self._hover else QColor("#94a3b8")
 
         p.setBrush(QBrush(bg_color))
         p.setPen(QPen(border_color, 1.6))
@@ -825,6 +844,7 @@ class TopLeftHoneycombOverlay(QWidget):
 
         signals.stream_toggle.connect(lambda enabled: self.hide() if enabled else (self.show() if net_state.is_injected else None))
         signals.show_honeycomb.connect(self.show_after_init)
+        signals.notify.connect(self.on_feature_notify)
 
     def show_after_init(self):
         self.move(20, 30)
@@ -834,6 +854,11 @@ class TopLeftHoneycombOverlay(QWidget):
         for k, btn in self.hex_buttons.items():
             btn.is_active = (k == active_idx)
             btn.update()
+
+    def on_feature_notify(self, feature, enabled):
+        if feature == 'LagEnemy' and 4 in self.hex_buttons:
+            self.hex_buttons[4].is_feature_active = enabled
+            self.hex_buttons[4].update()
 
 # ================= SLIDING STACKED WIDGET =================
 class SlidingStackedWidget(QStackedWidget):
@@ -1063,7 +1088,7 @@ class InitialGuiWidget(QWidget):
         layout.setContentsMargins(14, 8, 14, 14)
         layout.setSpacing(10)
 
-        layout.addWidget(TopBar("GUI 1.0.9", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
+        layout.addWidget(TopBar("GUI 1.1.0", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
         layout.addSpacing(15)
 
         status_lbl = QLabel("Enable Inject Connect")
@@ -1703,20 +1728,23 @@ class SettingTabPage(QWidget):
         self.btn_beep_freeze = QPushButton()
         self.btn_beep_ghost = QPushButton()
         self.btn_beep_aimlag = QPushButton()
+        self.btn_beep_lag_enemy = QPushButton()
 
-        for b in [self.btn_beep_tele, self.btn_beep_freeze, self.btn_beep_ghost, self.btn_beep_aimlag]:
-            b.setFixedHeight(26)
+        for b in [self.btn_beep_tele, self.btn_beep_freeze, self.btn_beep_ghost, self.btn_beep_aimlag, self.btn_beep_lag_enemy]:
+            b.setFixedHeight(24)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self.btn_beep_tele.clicked.connect(lambda: self.toggle_beep('tele'))
         self.btn_beep_freeze.clicked.connect(lambda: self.toggle_beep('freeze'))
         self.btn_beep_ghost.clicked.connect(lambda: self.toggle_beep('ghost'))
         self.btn_beep_aimlag.clicked.connect(lambda: self.toggle_beep('aimlag'))
+        self.btn_beep_lag_enemy.clicked.connect(lambda: self.toggle_beep('lag_enemy'))
 
         grid.addWidget(self.btn_beep_tele, 0, 0)
         grid.addWidget(self.btn_beep_freeze, 0, 1)
         grid.addWidget(self.btn_beep_ghost, 1, 0)
         grid.addWidget(self.btn_beep_aimlag, 1, 1)
+        grid.addWidget(self.btn_beep_lag_enemy, 2, 0)
 
         layout.addLayout(grid)
 
@@ -1737,7 +1765,7 @@ class SettingTabPage(QWidget):
                 color: {color};
                 border: 1px solid #27272a;
                 border-radius: 5px;
-                font-size: 9.5px;
+                font-size: 9px;
                 font-weight: 700;
                 font-family: 'Segoe UI', Arial;
             }}
@@ -1749,6 +1777,7 @@ class SettingTabPage(QWidget):
         self.update_btn_style(self.btn_beep_freeze, "Beep Freeze", app_config.beep_freeze)
         self.update_btn_style(self.btn_beep_ghost, "Beep Ghost", app_config.beep_ghost)
         self.update_btn_style(self.btn_beep_aimlag, "Beep AimLag", app_config.beep_aimlag)
+        self.update_btn_style(self.btn_beep_lag_enemy, "Beep Lag Địch", app_config.beep_lag_enemy)
         self.update_btn_style(self.fix_dame_btn, "Fix Dame", app_config.fix_dame_enabled)
 
     def toggle_beep(self, kind):
@@ -1756,6 +1785,7 @@ class SettingTabPage(QWidget):
         elif kind == 'freeze': app_config.beep_freeze = not app_config.beep_freeze
         elif kind == 'ghost': app_config.beep_ghost = not app_config.beep_ghost
         elif kind == 'aimlag': app_config.beep_aimlag = not app_config.beep_aimlag
+        elif kind == 'lag_enemy': app_config.beep_lag_enemy = not app_config.beep_lag_enemy
         save_config()
         self.update_all_buttons()
 
@@ -2111,7 +2141,7 @@ class FeedbackChatTabPage(QWidget):
         threading.Thread(target=_send_vps, daemon=True).start()
         threading.Thread(target=_send_discord, daemon=True).start()
 
-# TAB 4: LAG ĐỊCH (999+ PING)
+# TAB 4: LAG ĐỊCH (999+ PING) VỚI HOTKEY BINDING
 class LagEnemyTabPage(QWidget):
     def __init__(self, parent_widget, parent=None):
         super().__init__(parent)
@@ -2134,23 +2164,43 @@ class LagEnemyTabPage(QWidget):
             }
         """)
         c_layout = QVBoxLayout(card)
-        c_layout.setContentsMargins(15, 15, 15, 15)
+        c_layout.setContentsMargins(15, 12, 15, 12)
         c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        c_layout.setSpacing(8)
+        c_layout.setSpacing(6)
 
         lbl_title = QLabel("🔥 LÀM LAG ĐỊCH (999+ PING)")
         lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_title.setStyleSheet("color: #ef4444; font-size: 12px; font-weight: 900; font-family: 'Consolas', sans-serif; letter-spacing: 1px;")
+        lbl_title.setStyleSheet("color: #ef4444; font-size: 11.5px; font-weight: 900; font-family: 'Consolas', sans-serif; letter-spacing: 1px;")
         c_layout.addWidget(lbl_title)
 
-        lbl_desc = QLabel("Bóp băng thông đối phương, đẩy ping địch lên 999+ ms khiến kẻ địch đứng hình không bắn được.")
-        lbl_desc.setWordWrap(True)
-        lbl_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_desc.setStyleSheet("color: #9ca3af; font-size: 9px; font-family: 'Segoe UI', Arial;")
-        c_layout.addWidget(lbl_desc)
+        # Hàng chỉnh hotkey cho Lag Địch
+        row = QHBoxLayout()
+        row.setContentsMargins(4, 1, 4, 1)
+        lbl_hk = QLabel("HOTKEY LAG ĐỊCH")
+        lbl_hk.setStyleSheet("color: #f4f4f5; font-size: 10px; font-weight: 700; font-family: 'Segoe UI', Arial;")
+        row.addWidget(lbl_hk)
+        row.addStretch()
+
+        self.btn_hotkey = QPushButton(app_config.lag_enemy_hotkey.key.upper())
+        self.btn_hotkey.setFixedSize(58, 22)
+        self.btn_hotkey.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_hotkey.setStyleSheet("""
+            QPushButton {
+                background-color: #12151c;
+                color: #ffffff;
+                border: 1px solid #222733;
+                border-radius: 5px;
+                font-size: 10px;
+                font-weight: 700;
+            }
+            QPushButton:hover { background-color: #1a1f2c; border-color: #3b4252; }
+        """)
+        self.btn_hotkey.clicked.connect(self.start_rebinding)
+        row.addWidget(self.btn_hotkey)
+        c_layout.addLayout(row)
 
         self.toggle_btn = QPushButton("BẬT LAG ĐỊCH")
-        self.toggle_btn.setFixedHeight(32)
+        self.toggle_btn.setFixedHeight(28)
         self.toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.toggle_btn.setStyleSheet("""
             QPushButton {
@@ -2158,7 +2208,7 @@ class LagEnemyTabPage(QWidget):
                 color: #ef4444;
                 border: 1px solid #ef4444;
                 border-radius: 6px;
-                font-size: 10.5px;
+                font-size: 10px;
                 font-weight: 800;
                 font-family: 'Consolas', sans-serif;
             }
@@ -2168,6 +2218,16 @@ class LagEnemyTabPage(QWidget):
         c_layout.addWidget(self.toggle_btn)
 
         layout.addWidget(card)
+
+    def start_rebinding(self):
+        self.btn_hotkey.setText("...")
+        def on_key(event):
+            k = event.name.lower() if len(event.name) > 1 else event.name
+            app_config.lag_enemy_hotkey.key = k
+            self.btn_hotkey.setText(k.upper())
+            keyboard.unhook(hook)
+            save_config()
+        hook = keyboard.on_release(on_key)
 
     def on_toggle_clicked(self):
         toggle_lag_enemy()
@@ -2180,7 +2240,7 @@ class LagEnemyTabPage(QWidget):
                     color: #ffffff;
                     border: 1px solid #00ff66;
                     border-radius: 6px;
-                    font-size: 10.5px;
+                    font-size: 10px;
                     font-weight: 800;
                     font-family: 'Consolas', sans-serif;
                 }
@@ -2193,7 +2253,7 @@ class LagEnemyTabPage(QWidget):
                     color: #ef4444;
                     border: 1px solid #ef4444;
                     border-radius: 6px;
-                    font-size: 10.5px;
+                    font-size: 10px;
                     font-weight: 800;
                     font-family: 'Consolas', sans-serif;
                 }
@@ -2246,7 +2306,7 @@ class KeybindsWidget(QWidget):
 
     def adjust_panel_size(self):
         curr_idx = self.tab_stack.currentIndex()
-        h_map = {0: 175, 1: 175, 2: 220, 3: 205, 4: 175}
+        h_map = {0: 175, 1: 185, 2: 220, 3: 205, 4: 175}
         target_h = h_map.get(curr_idx, 180)
         
         if self.parentWidget() and hasattr(self.parentWidget(), 'resize'):
