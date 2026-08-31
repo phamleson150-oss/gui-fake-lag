@@ -193,9 +193,9 @@ def is_emulator_in_foreground():
 
 # ================= NETWORK FILTERS =================
 FILTER_FREEZE_FIX = "udp and ((udp.SrcPort >= 7000 and udp.SrcPort <= 18000) or (udp.DstPort >= 7000 and udp.DstPort <= 18000))"
-FILTER_I          = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
-FILTER_F          = "(udp.PayloadLength >= 53 and udp.PayloadLength <= 170) and (udp.DstPort >= 10011 and udp.DstPort <= 10020)"
-FILTER_O          = "udp.DstPort >= 10010 and udp.DstPort <= 10020 and udp.PayloadLength >= 35"
+FILTER_I         = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
+FILTER_F         = "(udp.PayloadLength >= 53 and udp.PayloadLength <= 170) and (udp.DstPort >= 10011 and udp.DstPort <= 10020)"
+FILTER_O         = "udp.DstPort >= 10010 and udp.DstPort <= 10020 and udp.PayloadLength >= 35"
 FILTER_AIMLAG     = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
 
 MAX_PACKETS = 80
@@ -399,7 +399,7 @@ class DivertSession:
             except Exception:
                 pass
 
-    def stop_and_flush(self):
+    def stop_and_flush(self, flush=True):
         with self.lock:
             if not self.is_active and not self.packets:
                 return
@@ -411,7 +411,8 @@ class DivertSession:
                     pass
                 self.handle = None
             
-            pkts_to_send = list(self.packets)
+            # Nếu flush=False, xóa sạch danh sách gói tin cũ để tránh server game nhận lại tọa độ cũ gây "giật về" (rubber-banding)
+            pkts_to_send = list(self.packets) if flush else []
             self.packets.clear()
 
         if pkts_to_send:
@@ -470,7 +471,7 @@ def divert_freeze_fix_dame_worker():
             debug_log(f"Freeze fix divert error: {e}")
             time.sleep(0.05)
 
-# ================= TOGGLE CHỨC NĂNG =================
+# ================= TOGGLE CHỨC NĂNG (Đã fix giật về cho Ghost & Telekill) =================
 def toggle_freeze():
     if not net_state.is_injected or net_state.current_tab != 0: return
     with net_state.lock:
@@ -478,7 +479,7 @@ def toggle_freeze():
             net_state.freeze_mode = False
             net_state.freeze_active_time = 0.0
             if not app_config.fix_dame_enabled:
-                freeze_shinmod_session.stop_and_flush()
+                freeze_shinmod_session.stop_and_flush(flush=False)
             active = False
         else:
             net_state.freeze_mode = True
@@ -495,7 +496,8 @@ def toggle_ghost():
     with net_state.lock:
         if net_state.ghost_mode:
             net_state.ghost_mode = False
-            ghost_session.stop_and_flush()
+            # flush=False ngăn chặn việc gửi lại gói tin cũ làm server kéo giật nhân vật về vị trí cũ
+            ghost_session.stop_and_flush(flush=False)
             active = False
         else:
             net_state.ghost_mode = True
@@ -510,7 +512,8 @@ def toggle_tele():
     with net_state.lock:
         if net_state.tele_mode:
             net_state.tele_mode = False
-            tele_session.stop_and_flush()
+            # flush=False giúp Telekill tắt lập tức, mượt mà tại vị trí mới không bị giật lùi vị trí
+            tele_session.stop_and_flush(flush=False)
             active = False
         else:
             net_state.tele_mode = True
@@ -527,7 +530,7 @@ def toggle_aimlag_arm():
         active = net_state.aimlag_armed
         if not active:
             net_state.mouse_held = False
-            aimlag_session.stop_and_flush()
+            aimlag_session.stop_and_flush(flush=True)
 
     audio.play_aimlag(active)
     signals.notify.emit('AimLag', active)
@@ -548,7 +551,7 @@ def on_mouse_click(x, y, button, pressed):
             else:
                 if net_state.mouse_held:
                     net_state.mouse_held = False
-                    aimlag_session.stop_and_flush()
+                    aimlag_session.stop_and_flush(flush=True)
 
 def stop_all_features():
     with net_state.lock:
@@ -558,10 +561,10 @@ def stop_all_features():
         net_state.aimlag_armed = False
         net_state.mouse_held = False
 
-    aimlag_session.stop_and_flush()
-    tele_session.stop_and_flush()
-    ghost_session.stop_and_flush()
-    freeze_shinmod_session.stop_and_flush()
+    aimlag_session.stop_and_flush(flush=True)
+    tele_session.stop_and_flush(flush=False)
+    ghost_session.stop_and_flush(flush=False)
+    freeze_shinmod_session.stop_and_flush(flush=False)
 
     signals.notify.emit('Freeze', False)
     signals.notify.emit('Telekill', False)
@@ -1460,7 +1463,7 @@ class InitializingWidget(QWidget):
             self.timer.stop()
             QTimer.singleShot(150, self.on_finish)
 
-# ================= POPUP THÔNG BÁO TỪ ADMIN (KHUNG ĐEN NÉT ĐỨT + NÚT XANH DƯƠNG) =================
+# ================= POPUP THÔNG BÁO TỪ ADMIN =================
 class AdminNoticeWidget(QWidget):
     def __init__(self, on_understood_callback, on_close_callback, parent=None):
         super().__init__(parent)
@@ -1546,7 +1549,7 @@ class KeyExpiredWidget(QWidget):
         title_lbl.setStyleSheet("color: #ef4444; font-size: 12px; font-weight: 800; font-family: 'Segoe UI', Arial;")
         layout.addWidget(title_lbl)
 
-        sub_lbl = QLabel("Hệ thống đã tự động ngắt toàn bộ Fake Lag.\nVui lòng gia hạn hoặc lấy key mới để tiếp tục.")
+        sub_lbl = QLabel("Hệ thống đã tự động ng tắt toàn bộ Fake Lag.\nVui lòng gia hạn hoặc lấy key mới để tiếp tục.")
         sub_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sub_lbl.setStyleSheet("color: #9ca3af; font-size: 10px; font-weight: 500; font-family: 'Segoe UI', Arial;")
         layout.addWidget(sub_lbl)
@@ -1697,7 +1700,7 @@ class SettingTabPage(QWidget):
         btn.setText(f"{text}: {'ON' if enabled else 'OFF'}")
         color = "#00ff66" if enabled else "#9ca3af"
         btn.setStyleSheet(f"""
-            QPushButton {{
+            QPushButton {
                 background-color: #0e1117;
                 color: {color};
                 border: 1px solid #27272a;
@@ -1705,8 +1708,8 @@ class SettingTabPage(QWidget):
                 font-size: 9.5px;
                 font-weight: 700;
                 font-family: 'Segoe UI', Arial;
-            }}
-            QPushButton:hover {{ background-color: #141821; border-color: #3f3f46; color: #ffffff; }}
+            }
+            QPushButton:hover { background-color: #141821; border-color: #3f3f46; color: #ffffff; }
         """)
 
     def update_all_buttons(self):
@@ -1814,7 +1817,7 @@ class InfoTabPage(QWidget):
         self.lbl_expiry.setText(f"Thời hạn còn lại: {time_str}")
         self.lbl_user.setText(f"Tên hiển thị: <span style='color:#22c55e; font-weight:bold;'>✔ {app_config.custom_nickname}</span>")
 
-# TAB 3: FEEDBACK & CHAT (HIỂN THỊ ĐỦ NGÀY, GIỜ, ROLE, USER)
+# TAB 3: FEEDBACK & CHAT
 class FeedbackChatTabPage(QWidget):
     def __init__(self, parent_widget, parent=None):
         super().__init__(parent)
@@ -1863,7 +1866,6 @@ class FeedbackChatTabPage(QWidget):
 
         self.sub_stack = QStackedWidget()
         
-        # VIEW 1: FEEDBACK
         fb_view = QWidget()
         fb_layout = QVBoxLayout(fb_view)
         fb_layout.setContentsMargins(0, 2, 0, 0)
@@ -1887,7 +1889,6 @@ class FeedbackChatTabPage(QWidget):
         self.send_fb_btn.clicked.connect(self.handle_send_feedback)
         fb_layout.addWidget(self.send_fb_btn)
 
-        # VIEW 2: CHAT TRỰC TIẾP
         chat_view = QWidget()
         chat_layout = QVBoxLayout(chat_view)
         chat_layout.setContentsMargins(0, 2, 0, 0)
@@ -2134,8 +2135,8 @@ class KeybindsWidget(QWidget):
         self.feedback_page = FeedbackChatTabPage(self)
         self.coming_soon_page = ComingSoonTabPage(self)
 
-        self.tab_stack.addWidget(self.main_page)         # 0: Fake Lag
-        self.tab_stack.addWidget(self.setting_page)      # 1: Setting
+        self.tab_stack.addWidget(self.main_page)       # 0: Fake Lag
+        self.tab_stack.addWidget(self.setting_page)     # 1: Setting
         self.tab_stack.addWidget(self.info_page)         # 2: Info
         self.tab_stack.addWidget(self.feedback_page)     # 3: Feedback & Chat
         self.tab_stack.addWidget(self.coming_soon_page)  # 4: Coming Soon
@@ -2459,7 +2460,6 @@ class MainContainerWindow(QWidget):
         self.stack.setCurrentIndex(3)
         self.download_view.start_download()
 
-        # Nạp trước thông báo từ VPS ở background ngay sau khi login
         def _prefetch_notice():
             try:
                 r = requests.get(VPS_ANNOUNCE_URL, timeout=3)
@@ -2477,7 +2477,6 @@ class MainContainerWindow(QWidget):
         self.init_view.start()
 
     def on_init_finished(self):
-        # Chuyển ngay lập tức sang Popup thông báo Admin (không chờ đợi mạng)
         self.notice_view.set_notice(self.cached_notice_title, self.cached_notice_content)
         self.resize(320, 195)
         self.bg_frame.setGeometry(0, 0, 320, 195)
