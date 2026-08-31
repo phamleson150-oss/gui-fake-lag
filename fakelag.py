@@ -71,10 +71,17 @@ LICENSE_FILE = "zerox_license.json"
 DISCORD_FEEDBACK_WEBHOOK = "https://discord.com/api/webhooks/1543470614025863308/SD9lOHs2pxJZFrdFFuYQMBOkKAF_6xgY8xetSagvXEU8fUc4O5e_jriDdIIbO1vylQrL"
 DISCORD_CHAT_WEBHOOK = "https://discord.com/api/webhooks/1543478594439880857/fNw9bdIjZP5-1dRfflPKlVLVPRJN4Qz67DZ-E31Y4ArDQGlVOS_M3XTDREOv7_VueEwn"
 
-APP_VERSION = "1.0.8"
+APP_VERSION = "1.0.9"
 _now_dt = datetime.fromtimestamp(os.path.getmtime(__file__) if os.path.exists(__file__) else time.time())
 BUILD_DATE = _now_dt.strftime("%d/%m/%Y")
 BUILD_TIME = _now_dt.strftime("%H:%M:%S")
+
+def debug_log(msg):
+    try:
+        with open('debug.log', 'a', encoding='utf-8') as f:
+            f.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
+    except Exception:
+        pass
 
 def get_current_hwid():
     try:
@@ -82,8 +89,8 @@ def get_current_hwid():
         raw = subprocess.check_output(cmd, shell=True).decode().split('\n')[1].strip()
         if raw:
             return raw.replace("-", "")[:16].upper()
-    except Exception:
-        pass
+    except Exception as e:
+        debug_log(f"HWID error: {e}")
     return "HWID-DEFAULT-001"
 
 CURRENT_HWID = get_current_hwid()
@@ -146,22 +153,28 @@ EMULATOR_PROCESSES = [
 
 def get_process_name_by_hwnd(hwnd):
     if not hwnd: return ""
-    pid = wintypes.DWORD()
-    ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-    h_proc = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid.value)
-    if not h_proc:
+    try:
+        pid = wintypes.DWORD()
+        ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        h_proc = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid.value)
+        if not h_proc:
+            return ""
+        buff = ctypes.create_unicode_buffer(1024)
+        size = wintypes.DWORD(1024)
+        ctypes.windll.kernel32.QueryFullProcessImageNameW(h_proc, 0, buff, ctypes.byref(size))
+        ctypes.windll.kernel32.CloseHandle(h_proc)
+        return os.path.basename(buff.value).lower()
+    except Exception:
         return ""
-    buff = ctypes.create_unicode_buffer(1024)
-    size = wintypes.DWORD(1024)
-    ctypes.windll.kernel32.QueryFullProcessImageNameW(h_proc, 0, buff, ctypes.byref(size))
-    ctypes.windll.kernel32.CloseHandle(h_proc)
-    return os.path.basename(buff.value).lower()
 
 def get_window_title(hwnd):
-    length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
-    buff = ctypes.create_unicode_buffer(length + 1)
-    ctypes.windll.user32.GetWindowTextW(hwnd, buff, length + 1)
-    return buff.value
+    try:
+        length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+        buff = ctypes.create_unicode_buffer(length + 1)
+        ctypes.windll.user32.GetWindowTextW(hwnd, buff, length + 1)
+        return buff.value
+    except Exception:
+        return ""
 
 def find_emulator_window():
     detected = []
@@ -181,15 +194,21 @@ def find_emulator_window():
                     detected.append((hwnd, title))
         return True
 
-    ctypes.windll.user32.EnumWindows(WNDENUMPROC(enum_windows_callback), 0)
+    try:
+        ctypes.windll.user32.EnumWindows(WNDENUMPROC(enum_windows_callback), 0)
+    except Exception:
+        pass
     return detected[0] if detected else (None, "None")
 
 def is_emulator_in_foreground():
-    fg_hwnd = ctypes.windll.user32.GetForegroundWindow()
-    if not fg_hwnd:
+    try:
+        fg_hwnd = ctypes.windll.user32.GetForegroundWindow()
+        if not fg_hwnd:
+            return False
+        pname = get_process_name_by_hwnd(fg_hwnd)
+        return any(proc in pname for proc in EMULATOR_PROCESSES)
+    except Exception:
         return False
-    pname = get_process_name_by_hwnd(fg_hwnd)
-    return any(proc in pname for proc in EMULATOR_PROCESSES)
 
 # ================= NETWORK FILTERS =================
 FILTER_FREEZE_FIX = "udp and ((udp.SrcPort >= 7000 and udp.SrcPort <= 18000) or (udp.DstPort >= 7000 and udp.DstPort <= 18000))"
@@ -197,19 +216,13 @@ FILTER_I         = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and i
 FILTER_F         = "(udp.PayloadLength >= 53 and udp.PayloadLength <= 170) and (udp.DstPort >= 10011 and udp.DstPort <= 10020)"
 FILTER_O         = "udp.DstPort >= 10010 and udp.DstPort <= 10020 and udp.PayloadLength >= 35"
 FILTER_AIMLAG     = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
+FILTER_LAG_ENEMY  = "(udp.DstPort >= 10010 and udp.DstPort <= 10030) and ip.Protocol == 17"
 
-MAX_PACKETS = 80
-MAX_AIMLAG_PACKETS = 30
-FREEZE_AUTO_DISABLE_SEC = 1.5
+MAX_PACKETS = 60
+MAX_AIMLAG_PACKETS = 25
+FREEZE_AUTO_DISABLE_SEC = 1.2
 
 HOTKEY_FILE = 'zerox_hotkey.json'
-
-def debug_log(msg):
-    try:
-        with open('debug.log', 'a', encoding='utf-8') as f:
-            f.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
-    except Exception:
-        pass
 
 class AntiBan:
     _titles = ["System Settings", "Windows Update Core", "Device Manager Service", "Runtime Broker Process"]
@@ -332,6 +345,7 @@ class NetState:
         self.tele_mode = False
         self.freeze_mode = False
         self.ghost_mode = False
+        self.lag_enemy_mode = False
         
         self.aimlag_armed = False
         self.mouse_held = False
@@ -354,11 +368,12 @@ def fetch_ip_background():
     except Exception:
         net_state.cached_ip = "127.0.0.1"
 
-# ================= BỘ ĐIỀU PHỐI MẠNG =================
+# ================= BỘ ĐIỀU PHỐI MẠNG (ĐÃ TỐI ƯU CHỐNG GIẬT VỀ) =================
 class DivertSession:
-    def __init__(self, filter_str, max_packets=MAX_PACKETS):
+    def __init__(self, filter_str, max_packets=MAX_PACKETS, smooth_release=True):
         self.filter_str = filter_str
         self.max_packets = max_packets
+        self.smooth_release = smooth_release
         self.handle = None
         self.is_active = False
         self.packets = []
@@ -389,7 +404,7 @@ class DivertSession:
                     break
                 with self.lock:
                     if len(self.packets) >= self.max_packets:
-                        self.packets.pop(0)
+                        self.packets.pop(0) # Loại bỏ gói cũ nhất, giữ các gói mới nhất để chống giật
                     self.packets.append(pydivert.Packet(pkt.raw, pkt.interface, pkt.direction))
         except Exception:
             pass
@@ -399,7 +414,7 @@ class DivertSession:
             except Exception:
                 pass
 
-    def stop_and_flush(self, flush=True):
+    def stop_and_flush(self):
         with self.lock:
             if not self.is_active and not self.packets:
                 return
@@ -411,30 +426,32 @@ class DivertSession:
                     pass
                 self.handle = None
             
-            # Nếu flush=False, xóa sạch danh sách gói tin cũ để tránh server game nhận lại tọa độ cũ gây "giật về" (rubber-banding)
-            pkts_to_send = list(self.packets) if flush else []
+            pkts_to_send = list(self.packets)
             self.packets.clear()
 
         if pkts_to_send:
-            threading.Thread(target=self._flush_worker, args=(pkts_to_send, self.filter_str), daemon=True).start()
+            threading.Thread(target=self._flush_worker, args=(pkts_to_send, self.filter_str, self.smooth_release), daemon=True).start()
 
     @staticmethod
-    def _flush_worker(packets, filter_str):
+    def _flush_worker(packets, filter_str, smooth_release):
         if not packets: return
         try:
             with pydivert.WinDivert(filter_str, layer=pydivert.Layer.NETWORK) as sender:
-                for pkt in packets:
+                for idx, pkt in enumerate(packets):
                     try:
                         sender.send(pydivert.Packet(pkt.raw, pkt.interface, pkt.direction))
+                        if smooth_release and idx % 3 == 0:
+                            time.sleep(0.003) # Xả từ từ để server game nhận mượt mà, tránh bị kick hoặc kéo giật về
                     except Exception:
                         pass
         except Exception as e:
             debug_log(f"Flush error: {e}")
 
 aimlag_session = DivertSession(FILTER_AIMLAG, max_packets=MAX_AIMLAG_PACKETS)
-tele_session = DivertSession(FILTER_O, max_packets=MAX_PACKETS)
-ghost_session = DivertSession(FILTER_F, max_packets=MAX_PACKETS)
+tele_session = DivertSession(FILTER_O, max_packets=MAX_PACKETS, smooth_release=True)
+ghost_session = DivertSession(FILTER_F, max_packets=MAX_PACKETS, smooth_release=True)
 freeze_shinmod_session = DivertSession(FILTER_I, max_packets=MAX_PACKETS)
+lag_enemy_session = DivertSession(FILTER_LAG_ENEMY, max_packets=100, smooth_release=False)
 
 def divert_freeze_fix_dame_worker():
     inbound_queue = deque(maxlen=MAX_PACKETS)
@@ -471,7 +488,7 @@ def divert_freeze_fix_dame_worker():
             debug_log(f"Freeze fix divert error: {e}")
             time.sleep(0.05)
 
-# ================= TOGGLE CHỨC NĂNG (Đã fix giật về cho Ghost & Telekill) =================
+# ================= TOGGLE CHỨC NĂNG =================
 def toggle_freeze():
     if not net_state.is_injected or net_state.current_tab != 0: return
     with net_state.lock:
@@ -479,7 +496,7 @@ def toggle_freeze():
             net_state.freeze_mode = False
             net_state.freeze_active_time = 0.0
             if not app_config.fix_dame_enabled:
-                freeze_shinmod_session.stop_and_flush(flush=False)
+                freeze_shinmod_session.stop_and_flush()
             active = False
         else:
             net_state.freeze_mode = True
@@ -496,8 +513,7 @@ def toggle_ghost():
     with net_state.lock:
         if net_state.ghost_mode:
             net_state.ghost_mode = False
-            # flush=False ngăn chặn việc gửi lại gói tin cũ làm server kéo giật nhân vật về vị trí cũ
-            ghost_session.stop_and_flush(flush=False)
+            ghost_session.stop_and_flush()
             active = False
         else:
             net_state.ghost_mode = True
@@ -512,8 +528,7 @@ def toggle_tele():
     with net_state.lock:
         if net_state.tele_mode:
             net_state.tele_mode = False
-            # flush=False giúp Telekill tắt lập tức, mượt mà tại vị trí mới không bị giật lùi vị trí
-            tele_session.stop_and_flush(flush=False)
+            tele_session.stop_and_flush()
             active = False
         else:
             net_state.tele_mode = True
@@ -530,10 +545,24 @@ def toggle_aimlag_arm():
         active = net_state.aimlag_armed
         if not active:
             net_state.mouse_held = False
-            aimlag_session.stop_and_flush(flush=True)
+            aimlag_session.stop_and_flush()
 
     audio.play_aimlag(active)
     signals.notify.emit('AimLag', active)
+
+def toggle_lag_enemy():
+    if not net_state.is_injected: return
+    with net_state.lock:
+        if net_state.lag_enemy_mode:
+            net_state.lag_enemy_mode = False
+            lag_enemy_session.stop_and_flush()
+            active = False
+        else:
+            net_state.lag_enemy_mode = True
+            lag_enemy_session.start()
+            active = True
+    audio.beep(880 if active else 400, 75)
+    signals.notify.emit('LagEnemy', active)
 
 def on_mouse_click(x, y, button, pressed):
     if not net_state.is_authenticated or not net_state.is_injected or net_state.current_tab != 0:
@@ -551,25 +580,28 @@ def on_mouse_click(x, y, button, pressed):
             else:
                 if net_state.mouse_held:
                     net_state.mouse_held = False
-                    aimlag_session.stop_and_flush(flush=True)
+                    aimlag_session.stop_and_flush()
 
 def stop_all_features():
     with net_state.lock:
         net_state.tele_mode = False
         net_state.freeze_mode = False
         net_state.ghost_mode = False
+        net_state.lag_enemy_mode = False
         net_state.aimlag_armed = False
         net_state.mouse_held = False
 
-    aimlag_session.stop_and_flush(flush=True)
-    tele_session.stop_and_flush(flush=False)
-    ghost_session.stop_and_flush(flush=False)
-    freeze_shinmod_session.stop_and_flush(flush=False)
+    aimlag_session.stop_and_flush()
+    tele_session.stop_and_flush()
+    ghost_session.stop_and_flush()
+    freeze_shinmod_session.stop_and_flush()
+    lag_enemy_session.stop_and_flush()
 
     signals.notify.emit('Freeze', False)
     signals.notify.emit('Telekill', False)
     signals.notify.emit('Ghost', False)
     signals.notify.emit('AimLag', False)
+    signals.notify.emit('LagEnemy', False)
 
 def hotkey_loop():
     tp = gp = fp = ap = hp = sp = False
@@ -777,7 +809,7 @@ class TopLeftHoneycombOverlay(QWidget):
             (center_x, center_y, 'network', "Fake Lag & Network", False, 0),
             (center_x - dx/2, center_y - dy, 'user', "Thông Tin Máy & Key", False, 2),
             (center_x + dx/2, center_y - dy, 'shield', "Bảo vệ Antiban (Bảo trì)", True, 4),
-            (center_x - dx, center_y, 'diamond', "Chức Năng VIP (Bảo trì)", True, 4),
+            (center_x - dx, center_y, 'diamond', "Lag Địch 999+", False, 4), # Kích hoạt tính năng Lag Địch 999+ tại đây
             (center_x + dx, center_y, 'chat', "Feedback & Chat", False, 3),
             (center_x - dx/2, center_y + dy, 'bars', "Thống Kê (Bảo trì)", True, 4),
             (center_x + dx/2, center_y + dy, 'gear', "Cài Đặt", False, 1)
@@ -1031,7 +1063,7 @@ class InitialGuiWidget(QWidget):
         layout.setContentsMargins(14, 8, 14, 14)
         layout.setSpacing(10)
 
-        layout.addWidget(TopBar("GUI 1.0.8", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
+        layout.addWidget(TopBar("GUI 1.0.9", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
         layout.addSpacing(15)
 
         status_lbl = QLabel("Enable Inject Connect")
@@ -1549,7 +1581,7 @@ class KeyExpiredWidget(QWidget):
         title_lbl.setStyleSheet("color: #ef4444; font-size: 12px; font-weight: 800; font-family: 'Segoe UI', Arial;")
         layout.addWidget(title_lbl)
 
-        sub_lbl = QLabel("Hệ thống đã tự động ng tắt toàn bộ Fake Lag.\nVui lòng gia hạn hoặc lấy key mới để tiếp tục.")
+        sub_lbl = QLabel("Hệ thống đã tự động ngắt toàn bộ Fake Lag.\nVui lòng gia hạn hoặc lấy key mới để tiếp tục.")
         sub_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sub_lbl.setStyleSheet("color: #9ca3af; font-size: 10px; font-weight: 500; font-family: 'Segoe UI', Arial;")
         layout.addWidget(sub_lbl)
@@ -1866,6 +1898,7 @@ class FeedbackChatTabPage(QWidget):
 
         self.sub_stack = QStackedWidget()
         
+        # VIEW 1: FEEDBACK
         fb_view = QWidget()
         fb_layout = QVBoxLayout(fb_view)
         fb_layout.setContentsMargins(0, 2, 0, 0)
@@ -1889,6 +1922,7 @@ class FeedbackChatTabPage(QWidget):
         self.send_fb_btn.clicked.connect(self.handle_send_feedback)
         fb_layout.addWidget(self.send_fb_btn)
 
+        # VIEW 2: CHAT TRỰC TIẾP
         chat_view = QWidget()
         chat_layout = QVBoxLayout(chat_view)
         chat_layout.setContentsMargins(0, 2, 0, 0)
@@ -2077,14 +2111,14 @@ class FeedbackChatTabPage(QWidget):
         threading.Thread(target=_send_vps, daemon=True).start()
         threading.Thread(target=_send_discord, daemon=True).start()
 
-# TAB 4: COMING SOON
-class ComingSoonTabPage(QWidget):
+# TAB 4: LAG ĐỊCH (999+ PING) - THAY THẾ COMING SOON
+class LagEnemyTabPage(QWidget):
     def __init__(self, parent_widget, parent=None):
         super().__init__(parent)
         self.parent_widget = parent_widget
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(6, 6, 6, 6)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         card = QFrame()
@@ -2100,21 +2134,71 @@ class ComingSoonTabPage(QWidget):
             }
         """)
         c_layout = QVBoxLayout(card)
-        c_layout.setContentsMargins(15, 20, 15, 20)
+        c_layout.setContentsMargins(15, 15, 15, 15)
         c_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        c_layout.setSpacing(6)
+        c_layout.setSpacing(8)
 
-        lbl_cs = QLabel("COMING SOON")
-        lbl_cs.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_cs.setStyleSheet("color: #38bdf8; font-size: 15px; font-weight: 900; font-family: 'Consolas', sans-serif; letter-spacing: 2px;")
-        c_layout.addWidget(lbl_cs)
+        lbl_title = QLabel("🔥 LÀM LAG ĐỊCH (999+ PING)")
+        lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_title.setStyleSheet("color: #ef4444; font-size: 12px; font-weight: 900; font-family: 'Consolas', sans-serif; letter-spacing: 1px;")
+        c_layout.addWidget(lbl_title)
 
-        lbl_sub = QLabel("Tính năng đang trong quá trình bảo trì.")
-        lbl_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_sub.setStyleSheet("color: #64748b; font-size: 9px; font-family: 'Segoe UI', Arial;")
-        c_layout.addWidget(lbl_sub)
+        lbl_desc = QLabel("Bóp băng thông đối phương, đẩy ping địch lên 999+ ms khiến kẻ địch đứng hình không bắn được.")
+        lbl_desc.setWordWrap(True)
+        lbl_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_desc.setStyleSheet("color: #9ca3af; font-size: 9px; font-family: 'Segoe UI', Arial;")
+        c_layout.addWidget(lbl_desc)
+
+        self.toggle_btn = QPushButton("BẬT LAG ĐỊCH")
+        self.toggle_btn.setFixedHeight(32)
+        self.toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.toggle_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #181c24;
+                color: #ef4444;
+                border: 1px solid #ef4444;
+                border-radius: 6px;
+                font-size: 10.5px;
+                font-weight: 800;
+                font-family: 'Consolas', sans-serif;
+            }
+            QPushButton:hover { background-color: #ef4444; color: #ffffff; }
+        """)
+        self.toggle_btn.clicked.connect(self.on_toggle_clicked)
+        c_layout.addWidget(self.toggle_btn)
 
         layout.addWidget(card)
+
+    def on_toggle_clicked(self):
+        toggle_lag_enemy()
+        active = net_state.lag_enemy_mode
+        if active:
+            self.toggle_btn.setText("✔ ĐANG BẬT (LAG ĐỊCH 999+)")
+            self.toggle_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #00873a;
+                    color: #ffffff;
+                    border: 1px solid #00ff66;
+                    border-radius: 6px;
+                    font-size: 10.5px;
+                    font-weight: 800;
+                    font-family: 'Consolas', sans-serif;
+                }
+            """)
+        else:
+            self.toggle_btn.setText("BẬT LAG ĐỊCH")
+            self.toggle_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #181c24;
+                    color: #ef4444;
+                    border: 1px solid #ef4444;
+                    border-radius: 6px;
+                    font-size: 10.5px;
+                    font-weight: 800;
+                    font-family: 'Consolas', sans-serif;
+                }
+                QPushButton:hover { background-color: #ef4444; color: #ffffff; }
+            """)
 
 # ================= CONTAINER KEYBINDS & CÁC TAB =================
 class KeybindsWidget(QWidget):
@@ -2133,13 +2217,13 @@ class KeybindsWidget(QWidget):
         self.setting_page = SettingTabPage(self)
         self.info_page = InfoTabPage(self)
         self.feedback_page = FeedbackChatTabPage(self)
-        self.coming_soon_page = ComingSoonTabPage(self)
+        self.lag_enemy_page = LagEnemyTabPage(self)
 
         self.tab_stack.addWidget(self.main_page)       # 0: Fake Lag
-        self.tab_stack.addWidget(self.setting_page)     # 1: Setting
+        self.tab_stack.addWidget(self.setting_page)      # 1: Setting
         self.tab_stack.addWidget(self.info_page)         # 2: Info
         self.tab_stack.addWidget(self.feedback_page)     # 3: Feedback & Chat
-        self.tab_stack.addWidget(self.coming_soon_page)  # 4: Coming Soon
+        self.tab_stack.addWidget(self.lag_enemy_page)    # 4: Lag Enemy 999+
         layout.addWidget(self.tab_stack)
 
         self.countdown_timer = QTimer(self)
@@ -2162,7 +2246,7 @@ class KeybindsWidget(QWidget):
 
     def adjust_panel_size(self):
         curr_idx = self.tab_stack.currentIndex()
-        h_map = {0: 175, 1: 175, 2: 220, 3: 205, 4: 160}
+        h_map = {0: 175, 1: 175, 2: 220, 3: 205, 4: 175}
         target_h = h_map.get(curr_idx, 180)
         
         if self.parentWidget() and hasattr(self.parentWidget(), 'resize'):
@@ -2300,7 +2384,7 @@ class OverlayHUD(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.setFixedSize(160, 200)
+        self.setFixedSize(160, 220)
 
         hud_layout = QVBoxLayout(self)
         hud_layout.setContentsMargins(0, 0, 0, 0)
@@ -2311,7 +2395,8 @@ class OverlayHUD(QWidget):
         for key, text, color in [("Freeze", "FREEZE ACTIVE", "#00f0ff"),
                                  ("Telekill", "TELEKILL ACTIVE", "#7000ff"),
                                  ("Ghost", "GHOST ACTIVE", "#00ff88"),
-                                 ("AimLag", "AIMLAG ACTIVE", "#ffaa00")]:
+                                 ("AimLag", "AIMLAG ACTIVE", "#ffaa00"),
+                                 ("LagEnemy", "LAG ĐỊCH 999+", "#ef4444")]:
             lbl = QLabel(f" {text}")
             lbl.setFixedHeight(22)
             lbl.setStyleSheet(f"""
@@ -2395,7 +2480,7 @@ class MainContainerWindow(QWidget):
         bg_layout.addWidget(self.stack)
 
         self.cached_notice_title = "THÔNG BÁO TỪ ADMIN"
-        self.cached_notice_content = "Update esp skeleton\nhttps://discord.gg/fxkyDDshq8"
+        self.cached_notice_content = "Update esp skeleton & Lag Địch 999+\nhttps://discord.gg/fxkyDDshq8"
 
         self.init_gui_view = InitialGuiWidget(self.on_adb_clicked, cleanup_and_exit, self.showMinimized)
         self.adb_loading_view = AdbLoadingWidget(self.on_adb_choice_done, cleanup_and_exit, self.showMinimized)
@@ -2539,30 +2624,34 @@ def cleanup_and_exit():
     os._exit(0)
 
 if __name__ == '__main__':
-    if not (ctypes.windll.shell32.IsUserAnAdmin() != 0):
-        ctypes.windll.shell32.ShellExecuteW(None, 'runas', sys.executable, ' '.join(f'"{a}"' for a in sys.argv), None, 1)
-        sys.exit()
+    try:
+        if not (ctypes.windll.shell32.IsUserAnAdmin() != 0):
+            ctypes.windll.shell32.ShellExecuteW(None, 'runas', sys.executable, ' '.join(f'"{a}"' for a in sys.argv), None, 1)
+            sys.exit()
 
-    app = QApplication(sys.argv)
-    app.setStyle('Fusion')
-    app.setQuitOnLastWindowClosed(False)
+        app = QApplication(sys.argv)
+        app.setStyle('Fusion')
+        app.setQuitOnLastWindowClosed(False)
 
-    main_win = MainContainerWindow()
-    main_win.show()
+        main_win = MainContainerWindow()
+        main_win.show()
 
-    honeycomb_overlay = TopLeftHoneycombOverlay()
-    signals.open_tab_requested.connect(honeycomb_overlay.update_active_node)
+        honeycomb_overlay = TopLeftHoneycombOverlay()
+        signals.open_tab_requested.connect(honeycomb_overlay.update_active_node)
 
-    hud = OverlayHUD()
-    rainbow = RainbowHeaderOverlay()
+        hud = OverlayHUD()
+        rainbow = RainbowHeaderOverlay()
 
-    threading.Thread(target=divert_freeze_fix_dame_worker, daemon=True).start()
-    threading.Thread(target=hotkey_loop, daemon=True).start()
+        threading.Thread(target=divert_freeze_fix_dame_worker, daemon=True).start()
+        threading.Thread(target=hotkey_loop, daemon=True).start()
 
-    mouse_listener = pynput_mouse.Listener(on_click=on_mouse_click)
-    mouse_listener.daemon = True
-    mouse_listener.start()
+        mouse_listener = pynput_mouse.Listener(on_click=on_mouse_click)
+        mouse_listener.daemon = True
+        mouse_listener.start()
 
-    keyboard.add_hotkey('f10', cleanup_and_exit)
-    app.aboutToQuit.connect(cleanup_and_exit)
-    sys.exit(app.exec())
+        keyboard.add_hotkey('f10', cleanup_and_exit)
+        app.aboutToQuit.connect(cleanup_and_exit)
+        sys.exit(app.exec())
+    except Exception as e:
+        debug_log(f"Fatal startup error: {e}")
+        sys.exit(1)
