@@ -71,7 +71,7 @@ LICENSE_FILE = "zerox_license.json"
 DISCORD_FEEDBACK_WEBHOOK = "https://discord.com/api/webhooks/1543470614025863308/SD9lOHs2pxJZFrdFFuYQMBOkKAF_6xgY8xetSagvXEU8fUc4O5e_jriDdIIbO1vylQrL"
 DISCORD_CHAT_WEBHOOK = "https://discord.com/api/webhooks/1543478594439880857/fNw9bdIjZP5-1dRfflPKlVLVPRJN4Qz67DZ-E31Y4ArDQGlVOS_M3XTDREOv7_VueEwn"
 
-APP_VERSION = "1.1.2"
+APP_VERSION = "1.1.3"
 _now_dt = datetime.fromtimestamp(os.path.getmtime(__file__) if os.path.exists(__file__) else time.time())
 BUILD_DATE = _now_dt.strftime("%d/%m/%Y")
 BUILD_TIME = _now_dt.strftime("%H:%M:%S")
@@ -827,10 +827,10 @@ class TopLeftHoneycombOverlay(QWidget):
         nodes = [
             (center_x, center_y, 'network', "Fake Lag & Network", False, 0),
             (center_x - dx/2, center_y - dy, 'user', "Thông Tin Máy & Key", False, 2),
-            (center_x + dx/2, center_y - dy, 'shield', "Bảo vệ Antiban (Bảo trì)", True, 4),
-            (center_x - dx, center_y, 'bars', "Lag Địch 999+", False, 4),      # Đưa Lag Địch (bars) lên node bên trái (vị trí tương tự telekill)
+            (center_x + dx/2, center_y - dy, 'bars', "Lag Địch 999+", False, 4),      # Đưa Lag Địch lên vị trí Top-Right (lên cao)
+            (center_x - dx, center_y, 'shield', "Bảo vệ Antiban (Bảo trì)", True, 4), # Chuyển Shield sang bảo trì / coming soon
             (center_x + dx, center_y, 'chat', "Feedback & Chat", False, 3),
-            (center_x - dx/2, center_y + dy, 'diamond', "Chức năng VIP (Bảo trì)", True, 4), # Chuyển diamond thành bảo trì
+            (center_x - dx/2, center_y + dy, 'diamond', "Chức năng VIP (Bảo trì)", True, 4), # Chuyển Diamond sang bảo trì / coming soon
             (center_x + dx/2, center_y + dy, 'gear', "Cài Đặt", False, 1)
         ]
 
@@ -1088,7 +1088,7 @@ class InitialGuiWidget(QWidget):
         layout.setContentsMargins(14, 8, 14, 14)
         layout.setSpacing(10)
 
-        layout.addWidget(TopBar("GUI 1.1.2", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
+        layout.addWidget(TopBar("GUI 1.1.3", on_close=on_close_callback, on_minimize=on_minimize_callback, on_logo_click=self.handle_secret_click))
         layout.addSpacing(15)
 
         status_lbl = QLabel("Enable Inject Connect")
