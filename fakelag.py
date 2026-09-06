@@ -1526,7 +1526,7 @@ class AdminNoticeWidget(QWidget):
 
         self.content_lbl.setText(f"<div style='line-height: 1.4;'>{formatted_html}</div>")
 
-# ================= MÀN HÌNH BẢO TRÌ (HIỆN KHI ADMIN BẬT BẢO TRÌ) =================
+# ================= MÀN HÌNH BẢO TRÌ =================
 class MaintenanceWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -2447,7 +2447,6 @@ class MainContainerWindow(QWidget):
         self.sync_key_timer = QTimer(self)
         self.sync_key_timer.timeout.connect(self.sync_key_with_server)
 
-        # Bộ đếm thời gian kiểm tra bảo trì từ VPS mỗi 3 giây
         self.maint_timer = QTimer(self)
         self.maint_timer.timeout.connect(self.check_maintenance_status)
         self.maint_timer.start(3000)
@@ -2474,14 +2473,20 @@ class MainContainerWindow(QWidget):
     def handle_maintenance_mode(self, is_maint):
         if is_maint:
             if self.stack.currentIndex() != 6:
+                stop_all_features()
                 self.resize(300, 180)
                 self.bg_frame.setGeometry(0, 0, 300, 180)
                 self.stack.setCurrentIndex(6)
         else:
             if self.stack.currentIndex() == 6:
-                self.resize(300, 175)
-                self.bg_frame.setGeometry(0, 0, 300, 175)
-                self.stack.setCurrentIndex(7)
+                if net_state.is_injected:
+                    self.resize(300, 175)
+                    self.bg_frame.setGeometry(0, 0, 300, 175)
+                    self.stack.setCurrentIndex(7)
+                else:
+                    self.resize(300, 205)
+                    self.bg_frame.setGeometry(0, 0, 300, 205)
+                    self.stack.setCurrentIndex(0)
 
     def bring_to_front(self, _):
         if not self.isVisible():
@@ -2518,7 +2523,7 @@ class MainContainerWindow(QWidget):
         self.stack.setCurrentIndex(3)
         self.download_view.start_download()
 
-        def _prefetch_notice():
+        def _fetch_notice_in_thread():
             try:
                 r = requests.get(VPS_ANNOUNCE_URL, timeout=3)
                 if r.status_code == 200:
@@ -2527,7 +2532,7 @@ class MainContainerWindow(QWidget):
                     self.cached_notice_content = data.get("content", self.cached_notice_content)
             except Exception:
                 pass
-        threading.Thread(target=_prefetch_notice, daemon=True).start()
+        threading.Thread(target=_fetch_notice_in_thread, daemon=True).start()
 
     def on_inject_clicked(self):
         signals.start_tracking.emit()
@@ -2636,6 +2641,5 @@ if __name__ == '__main__':
     except Exception as e:
         with open("error.log", "w", encoding="utf-8") as f:
             f.write(str(e) + "\n")
-            import traceback
             traceback.print_exc(file=f)
         ctypes.windll.user32.MessageBoxW(0, f"Lỗi khởi động: {str(e)}", "ZeroX Error", 0x10)
