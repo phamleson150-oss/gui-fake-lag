@@ -62,12 +62,14 @@ except ImportError:
 
 # ================= CẤU HÌNH HỆ THỐNG =================
 VPS_BASE_URL = "http://103.78.3.222:53689"
+TOOL_SERVICE_NAME = "fakelag"  # Đã chuyển dịch vụ thành FAKE LAG theo yêu cầu
+
 VPS_VERIFY_URL = f"{VPS_BASE_URL}/api/verify_key"
 VPS_CHAT_URL = f"{VPS_BASE_URL}/api/chat"
 VPS_ANNOUNCE_URL = f"{VPS_BASE_URL}/api/announcement"
 VPS_MAINT_URL = f"{VPS_BASE_URL}/api/maintenance"
-GET_KEY_URL = f"{VPS_BASE_URL}/"
-LICENSE_FILE = "zerox_license.json"
+GET_KEY_URL = f"{VPS_BASE_URL}/?service={TOOL_SERVICE_NAME}"
+LICENSE_FILE = "zerox_fakelag_license.json"
 
 DISCORD_FEEDBACK_WEBHOOK = "https://discord.com/api/webhooks/1543470614025863308/SD9lOHs2pxJZFrdFFuYQMBOkKAF_6xgY8xetSagvXEU8fUc4O5e_jriDdIIbO1vylQrL"
 DISCORD_CHAT_WEBHOOK = "https://discord.com/api/webhooks/1543478594439880857/fNw9bdIjZP5-1dRfflPKlVLVPRJN4Qz67DZ-E31Y4ArDQGlVOS_M3XTDREOv7_VueEwn"
@@ -111,7 +113,7 @@ def verify_key_with_vps(key_str):
     if not key_str:
         return False, "Vui lòng nhập mã Key!", 0, "FREE"
     try:
-        url = f"{VPS_VERIFY_URL}?key={urllib.parse.quote(key_str)}&hwid={CURRENT_HWID}"
+        url = f"{VPS_VERIFY_URL}?key={urllib.parse.quote(key_str)}&hwid={CURRENT_HWID}&service={TOOL_SERVICE_NAME}"
         response = requests.get(url, timeout=4)
         res_data = response.json()
         valid = res_data.get("valid", False) or res_data.get("success", False)
@@ -194,20 +196,20 @@ def is_emulator_in_foreground():
 
 # ================= NETWORK FILTERS =================
 FILTER_FREEZE_FIX = "udp and ((udp.SrcPort >= 7000 and udp.SrcPort <= 18000) or (udp.DstPort >= 7000 and udp.DstPort <= 18000))"
-FILTER_I          = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
-FILTER_F          = "(udp.PayloadLength >= 53 and udp.PayloadLength <= 170) and (udp.DstPort >= 10011 and udp.DstPort <= 10020)"
-FILTER_O          = "udp.DstPort >= 10010 and udp.DstPort <= 10020 and udp.PayloadLength >= 35"
+FILTER_I         = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
+FILTER_F         = "(udp.PayloadLength >= 53 and udp.PayloadLength <= 170) and (udp.DstPort >= 10011 and udp.DstPort <= 10020)"
+FILTER_O         = "udp.DstPort >= 10010 and udp.DstPort <= 10020 and udp.PayloadLength >= 35"
 FILTER_AIMLAG     = "(udp.SrcPort >= 10011 and udp.SrcPort <= 10019) and ip and ip.Protocol == 17 and ip.Length >= 50 and ip.Length <= 1491"
 
 MAX_PACKETS = 40
 MAX_AIMLAG_PACKETS = 30
 FREEZE_AUTO_DISABLE_SEC = 1.0
 
-HOTKEY_FILE = 'zerox_hotkey.json'
+HOTKEY_FILE = 'zerox_fakelag_hotkey.json'
 
 def debug_log(msg):
     try:
-        with open('debug.log', 'a', encoding='utf-8') as f:
+        with open('debug_fakelag.log', 'a', encoding='utf-8') as f:
             f.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
     except Exception:
         pass
@@ -676,7 +678,7 @@ class VectorHexagonButton(QWidget):
         else:
             bg_color = QColor(16, 18, 24, 210) if not self._hover else QColor(30, 36, 50, 240)
             border_color = QColor("#818cf8") if self._hover else QColor(45, 52, 68, 180)
-            icon_color = QColor("#f1f5f9") if self._hover else QColor("#94a3b8")
+            icon_color = QColor("#f1f5f9") if not self._hover else QColor("#94a3b8")
 
         p.setBrush(QBrush(bg_color))
         p.setPen(QPen(border_color, 1.6))
@@ -1069,7 +1071,7 @@ class InitialGuiWidget(QWidget):
         self._secret_clicks += 1
         if self._secret_clicks >= 3:
             self._secret_clicks = 0
-            webbrowser.open(f"{VPS_BASE_URL}/key.html?admin=1")
+            webbrowser.open(f"{VPS_BASE_URL}/imguikey?service={TOOL_SERVICE_NAME}")
 
 class AdbLoadingWidget(QWidget):
     def __init__(self, on_choice_selected, on_close_callback, on_minimize_callback, parent=None):
@@ -1174,7 +1176,7 @@ class LoginWidget(QWidget):
         layout.setContentsMargins(14, 8, 14, 14)
         layout.setSpacing(5)
 
-        layout.addWidget(TopBar("ZeroX Cheat  /    Login", on_close=on_close_callback, on_minimize=on_minimize_callback))
+        layout.addWidget(TopBar("ZeroX Fake Lag  /    Login", on_close=on_close_callback, on_minimize=on_minimize_callback))
         layout.addSpacing(6)
 
         lbl_key = QLabel("LICENSE KEY")
@@ -2150,7 +2152,7 @@ class KeybindsWidget(QWidget):
         layout.setContentsMargins(10, 4, 10, 6)
         layout.setSpacing(4)
 
-        self.top_bar = TopBar("ZeroX", on_close=on_close_callback)
+        self.top_bar = TopBar("ZeroX Fake Lag", on_close=on_close_callback)
         layout.addWidget(self.top_bar)
 
         self.tab_stack = SlidingStackedWidget(self)
@@ -2160,7 +2162,7 @@ class KeybindsWidget(QWidget):
         self.feedback_page = FeedbackChatTabPage(self)
         self.coming_soon_page = ComingSoonTabPage(self)
 
-        self.tab_stack.addWidget(self.main_page)         # 0: Fake Lag
+        self.tab_stack.addWidget(self.main_page)       # 0: Fake Lag
         self.tab_stack.addWidget(self.setting_page)      # 1: Setting
         self.tab_stack.addWidget(self.info_page)         # 2: Info
         self.tab_stack.addWidget(self.feedback_page)     # 3: Feedback & Chat
@@ -2311,7 +2313,7 @@ class RainbowHeaderOverlay(QWidget):
             grad.setColorAt(stop_pos, QColor.fromHsvF(hue, 0.9, 1.0))
 
         p.setPen(QPen(QBrush(grad), 1))
-        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "ZeroX Mods")
+        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "ZeroX Fake Lag")
         p.end()
 
 class OverlayHUD(QWidget):
@@ -2639,7 +2641,7 @@ if __name__ == '__main__':
         app.aboutToQuit.connect(cleanup_and_exit)
         sys.exit(app.exec())
     except Exception as e:
-        with open("error.log", "w", encoding="utf-8") as f:
+        with open("error_fakelag.log", "w", encoding="utf-8") as f:
             f.write(str(e) + "\n")
             traceback.print_exc(file=f)
         ctypes.windll.user32.MessageBoxW(0, f"Lỗi khởi động: {str(e)}", "ZeroX Error", 0x10)
